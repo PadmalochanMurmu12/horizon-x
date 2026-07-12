@@ -1,0 +1,8 @@
+# Ignore the node_modules inside the server folder
+server/node_modules/
+
+# Ignore the database inside the server folder
+server/database.sqlite
+
+# Ignore any log files or environment variables
+server/.env
