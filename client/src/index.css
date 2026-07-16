@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+/* Full-Screen Vector Takeoff Flightpath */
+@keyframes vectorTakeoff {
+  0% { transform: translate(-20vw, 20vh) rotate(-25deg) scale(0.5); opacity: 0; }
+  15% { opacity: 1; }
+  100% { transform: translate(110vw, -110vh) rotate(-25deg) scale(2.2); opacity: 1; }
+}
+
+/* Vertically Falling Crash Descent */
+@keyframes planeFall {
+  0% { transform: translateY(-160px) rotate(180deg) scale(0.8); opacity: 0; }
+  15% { opacity: 1; }
+  45% { transform: translateY(80px) rotate(180deg) scale(1); opacity: 1; }
+  49% { transform: translateY(85px) rotate(180deg) scale(0.1); opacity: 0; }
+  100% { transform: translateY(85px) rotate(180deg) scale(0.1); opacity: 0; }
+}
+
+/* Crisp Outer Sharp Explosion Burst (No Blurs!) */
+@keyframes explosionOuterSharp {
+  0%, 48% { transform: scale(0); opacity: 0; }
+  50% { transform: scale(0.2); opacity: 1; }
+  62% { transform: scale(1.3); opacity: 1; }
+  80% { transform: scale(1.1); opacity: 0.9; }
+  100% { transform: scale(0.6); opacity: 0; }
+}
+
+/* Crisp Inner Orange Core Burst */
+@keyframes explosionCoreSharp {
+  0%, 48% { transform: scale(0); opacity: 0; }
+  50% { transform: scale(0.2); opacity: 1; }
+  65% { transform: scale(1.4); opacity: 1; }
+  82% { transform: scale(0.9); opacity: 0.9; }
+  100% { transform: scale(0.3); opacity: 0; }
+}
+
+/* Login Card Impact Shudder */
+@keyframes cardRattle {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  10%, 30%, 50%, 70%, 90% { transform: translate(-3px, 1.5px) rotate(-0.5deg); }
+  20%, 40%, 60%, 80% { transform: translate(3px, -1.5px) rotate(0.5deg); }
+}
+
+@keyframes radarPulse {
+  0% { transform: scale(0.95); opacity: 0.03; }
+  50% { transform: scale(1.05); opacity: 0.08; }
+  100% { transform: scale(0.95); opacity: 0.03; }
+}
+
+/* Target Style Utility Mappings */
+.animate-vector-takeoff {
+  animation: vectorTakeoff 1.6s forwards cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.animate-plane-fall {
+  animation: planeFall 2.2s forwards cubic-bezier(0.6, -0.28, 0.735, 0.045);
+}
+
+.animate-explosion-outer {
+  animation: explosionOuterSharp 2.2s forwards cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.animate-explosion-core {
+  animation: explosionCoreSharp 2.2s forwards cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.animate-shake {
+  animation: cardRattle 0.45s ease-in-out;
+}
+
+.animate-radar-sweep {
+  animation: radarPulse 5s infinite ease-in-out;
+}

@@ -12,21 +12,21 @@ async function seedDatabase() {
   try {
     console.log('🔄 Checking system database infrastructure configurations...');
 
-    // 1. Geography Check
+    // 1. Geography Check - Only populates if the table is completely brand new
     const locationCount = await Location.count();
     if (locationCount === 0) {
       await Location.bulkCreate(ACTIVE_AIRPORTS);
       console.log(`✅ Automated Seed: Mapped ${ACTIVE_AIRPORTS.length} operational Indian airport sectors.`);
     }
 
-    // 2. Fleet Inventory Check
+    // 2. Fleet Inventory Check - Only populates if the table is completely brand new
     const airlineCount = await Airline.count();
     if (airlineCount === 0) {
       await Airline.bulkCreate(ACTIVE_AIRLINES);
       console.log(`✅ Automated Seed: Certified ${ACTIVE_AIRLINES.length} flight carrier registries.`);
     }
 
-    // 3. Flight Segments Check
+    // 3. Flight Segments Check - Baseline schedules for search validation
     const flightCount = await Flight.count();
     if (flightCount === 0) {
       await Flight.bulkCreate([

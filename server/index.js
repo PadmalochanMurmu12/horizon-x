@@ -187,7 +187,7 @@ app.get('/api/test-seed', async (req, res) => {
  *     responses:
  *       200:
  *         description: Admin validation successful. Scoped token distributed.
- *       401:
+ *       400:
  *         description: Credential match evaluation failed.
  */
 app.post('/api/admin/login', (req, res) => {
@@ -198,7 +198,7 @@ app.post('/api/admin/login', (req, res) => {
     return res.status(200).json({ message: 'Welcome Admin', token: `Bearer ${token}` });
   }
 
-  res.status(401).json({ error: 'Access Denied. Invalid administrative tracking variables.' });
+  res.status(400).json({ error: 'Invalid Admin Credentials' });
 });
 
 /**
