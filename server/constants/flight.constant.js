@@ -1,0 +1,15 @@
+module.exports = {
+  CABIN_CLASSES: ['ECONOMY', 'PREMIUM_ECONOMY', 'BUSINESS', 'FIRST'],
+  CABIN_MULTIPLIERS: {
+    ECONOMY: 1.0,
+    PREMIUM_ECONOMY: 1.5,
+    BUSINESS: 2.5,
+    FIRST: 4.0,
+  },
+  CABIN_SEATS: {
+    ECONOMY: 120,
+    PREMIUM_ECONOMY: 30,
+    BUSINESS: 20,
+    FIRST: 8,
+  }
+};

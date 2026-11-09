@@ -1,24 +1,30 @@
-const { DataTypes } = require('sequelize');
-const sequelize = require('../config/database');
+module.exports = (sequelize, DataTypes) => {
+  const Location = sequelize.define('Location', {
+    airportCode: {
+      type: DataTypes.STRING(3),
+      primaryKey: true,
+      allowNull: false
+    },
+    cityName: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    stateOrUt: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    isAccessible: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: true
+    }
+  }, {
+    tableName: 'Locations'
+  });
 
-const Location = sequelize.define('Location', {
-  airportCode: {
-    type: DataTypes.STRING(3),
-    primaryKey: true, // DEL, BOM, etc.
-    allowNull: false
-  },
-  cityName: {
-    type: DataTypes.STRING,
-    allowNull: false
-  },
-  stateOrUt: {
-    type: DataTypes.STRING,
-    allowNull: false
-  },
-  isAccessible: {
-    type: DataTypes.BOOLEAN,
-    defaultValue: true // Operational gate status toggle
-  }
-});
+  Location.associate = (models) => {
+    Location.hasMany(models.Flight, { foreignKey: 'originAirportCode', sourceKey: 'airportCode' });
+    Location.hasMany(models.Flight, { foreignKey: 'destinationAirportCode', sourceKey: 'airportCode' });
+  };
 
-module.exports = Location;
+  return Location;
+};

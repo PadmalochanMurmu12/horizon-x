@@ -4,7 +4,7 @@ const sequelize = require('../config/database');
 const Airline = sequelize.define('Airline', {
   iataCode: {
     type: DataTypes.STRING(3),
-    primaryKey: true, // AI, 6E, SG, etc.
+    primaryKey: true,
     allowNull: false
   },
   name: {

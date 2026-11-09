@@ -1,45 +1,67 @@
-require('dotenv').config(); // Loaded first to parse secure credentials[cite: 5]
+require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const path = require('path');
-const { Op } = require('sequelize');
-const swaggerUi = require('swagger-ui-express');
+const cors    = require('cors');
+const bcrypt  = require('bcryptjs');
+const jwt     = require('jsonwebtoken');
+const { Op }  = require('sequelize');
+const swaggerUi   = require('swagger-ui-express');
 const swaggerJsdoc = require('swagger-jsdoc');
 
-const sequelize = require('./config/database');
-const seedDatabase = require('./utils/seeder');
-const ACTIVE_AIRLINES = require('./constants/ActiveAirlines');
-const ACTIVE_AIRPORTS = require('./constants/ActiveAirPorts');
-const Flight = require('./models/Flight');
-const User = require('./models/User');
-const Location = require('./models/Location');
-const Airline = require('./models/Airline');
+// Models & Config
+const { sequelize, Flight, User, Location, Airline } = require('./models');
+const { seedDatabase } = require('./utils/seeder');
+const { seedCancellationDefaults } = require('./utils/cancellation.seeder');
 
-const app = express();
+// Middleware — single source of truth
+const { authMiddleware, adminAuthMiddleware } = require('./middleware/auth');
+const noCache = require('./middleware/noCache');
+
+// Router Imports
+const itineraryRoutes = require('./routes/itinerary.routes');
+const airlineRoutes   = require('./routes/airlineRoutes');
+const checkoutRoutes  = require('./routes/checkout.routes');
+const cancellationRoutes = require('./routes/cancellation.routes');
+const bookingRoutes   = require('./routes/booking.routes');
+const checkinRoutes   = require('./routes/checkin.routes');
+const cancellationController = require('./controllers/cancellation.controller');
+const bookingController = require('./controllers/booking.controller');
+const checkoutController = require('./controllers/checkout.controller');
+const flightStatusController = require('./controllers/flightStatus.controller');
+
+const app  = express();
 const PORT = process.env.PORT || 5000;
-const JWT_SECRET = process.env.JWT_SECRET || 'horizon_x_secret_key';
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+const JWT_SECRET      = process.env.JWT_SECRET;
+const ADMIN_USERNAME  = process.env.ADMIN_USERNAME;
+const ADMIN_PASSWORD  = process.env.ADMIN_PASSWORD;
+const MOCK_EMAIL_OTP  = process.env.MOCK_EMAIL_OTP || '1111';
+const MOCK_PHONE_OTP  = process.env.MOCK_PHONE_OTP || '2222';
+
+// ─── Admin password hash caching ─────────────────────────────────────────────
+let _adminPwHash = null;
+const getAdminPwHash = async () => {
+  if (!_adminPwHash) _adminPwHash = await bcrypt.hash(ADMIN_PASSWORD, 10);
+  return _adminPwHash;
+};
 
 // ==========================================
-// SWAGGER CONFIGURATION (ORGANIZED COLLECTION)
+// SWAGGER CONFIGURATION
 // ==========================================
 const swaggerOptions = {
   definition: {
     openapi: '3.0.0',
     info: {
-      title: 'Horizon-X API documentation',
+      title: 'Horizon-X API Documentation',
       version: '1.0.0',
-      description: 'Unified backend API engine documentation sorted by operational privileges hierarchy.',
+      description: 'RESTful aviation endpoints for the Horizon-X flight booking and fleet management system.',
     },
-    servers: [{ url: `http://localhost:${PORT}`, description: 'Local Development Server' }],
-    // Declaring strict layout groupings (folders) inside Swagger UI
+    servers: [{ url: `http://localhost:${PORT}`, description: 'Local Ground Control Server' }],
     tags: [
-      { name: 'Admin Privileges', description: 'Administrative infrastructure control endpoints' },
-      { name: 'User privileges', description: 'Consumer workflow pipelines, onboarding, and itinerary search structures' },
-      { name: 'Utility APIs', description: 'System telemetry diagnostics and deployment seed routines' }
+      { name: 'Itinerary Engine',       description: 'Flight search, sector pairing, and connection logic' },
+      { name: 'Checkout & Bookings',    description: 'Stripe payments, PNR reservation, and boarding pass retrieval' },
+      { name: 'Cancellation & Refunds', description: 'Flight cancellation, refund calculations, passenger wallet, and fee configs' },
+      { name: 'Admin Panel',            description: 'Ground control and fleet operations administration' },
+      { name: 'User Panel',             description: 'Passenger onboarding, authentication, and profile management' },
+      { name: 'Utility APIs',           description: 'Avionics diagnostics, database seeder, and public airport lookups' }
     ],
     components: {
       securitySchemes: {
@@ -47,131 +69,176 @@ const swaggerOptions = {
           type: 'http',
           scheme: 'bearer',
           bearerFormat: 'JWT',
-          description: 'Enter your session token string to access locked routes.',
+          description: 'Enter your passenger session token (format: Bearer <token>)',
         },
       },
     },
   },
-  apis: [path.join(__dirname, 'index.js')], // Absolute resolution layout path[cite: 5]
+  apis: ['./index.js', './routes/*.js'],
 };
 
 const swaggerSpec = swaggerJsdoc(swaggerOptions);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
-// Global Middlewares
-app.use(cors());
-app.use(express.json({ limit: '50mb' }));
+// ==========================================
+// GLOBAL MIDDLEWARE STACK
+// ==========================================
+app.disable('etag');
+
+// Restrict CORS to authorized client origin
+app.use(cors({ origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173' }));
+
+// ==========================================
+// STRIPE ASYNCHRONOUS WEBHOOK DISPATCH
+// Must be mounted before express.json() to preserve raw Buffer for cryptographic signature verification
+// ==========================================
+app.post(
+  '/api/checkout/webhook',
+  express.raw({ type: 'application/json' }),
+  checkoutController.handleStripeWebhook
+);
+
+// Payload limit for JSON routes
+app.use(express.json({ limit: '10mb' }));
+
+// Anti-cache header enforcement
+app.use(noCache);
 
 // Defensive Request Guard Middleware
 app.use((req, res, next) => {
-  if ((req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') && (!req.body || Object.keys(req.body).length === 0)) {
-    return res.status(400).json({ error: 'Malformed request payload. Check your Content-Type headers.' });
+  if (req.path.includes('/complete') || req.path.includes('/webhook')) {
+    return next();
+  }
+  if (
+    (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') &&
+    (!req.body || Object.keys(req.body).length === 0)
+  ) {
+    return res.status(400).json({ error: 'Malformed flight dispatch payload. Please verify your Content-Type headers and request body.' });
   }
   next();
 });
 
-// User Validation Gatekeeper
-const authMiddleware = (req, res, next) => {
-  const authHeader = req.header('Authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Access denied. No token provided.' });
-  }
-  try {
-    const token = authHeader.split(' ')[1];
-    req.user = jwt.verify(token, JWT_SECRET); 
-    next();
-  } catch (error) {
-    res.status(400).json({ error: 'Invalid authentication token.' });
-  }
-};
-
-// Strict Admin Role Gatekeeper
-const adminAuthMiddleware = (req, res, next) => {
-  const authHeader = req.header('Authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Access denied. Admin token required.' });
-  }
-  try {
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, JWT_SECRET);
-    
-    if (decoded.role !== 'admin') {
-      return res.status(403).json({ error: 'Access denied. Administrative clearance required.' });
-    }
-    
-    req.user = decoded;
-    next();
-  } catch (error) {
-    res.status(400).json({ error: 'Invalid or expired administrative credentials.' });
-  }
-};
+// ==========================================
+// MODULE ROUTE MOUNTS
+// ==========================================
+app.use('/api/airlines',     airlineRoutes);
+app.use('/api/itinerary',    itineraryRoutes);
+app.use('/api/checkout',     checkoutRoutes);
+app.use('/api/cancellation', cancellationRoutes);
+app.use('/api/bookings',     bookingRoutes);
+app.use('/api/checkin',      checkinRoutes);
 
 // ==========================================
-// FOLDER 3: UTILITY APIs
+// UTILITY APIs
 // ==========================================
 
 /**
- * @swagger
+ * @openapi
  * /api/health:
  *   get:
- *     summary: System heartbeat verification status Check
- *     tags: [Utility APIs]
+ *     summary: System avionics health check
+ *     tags:
+ *       - Utility APIs
  *     responses:
  *       200:
- *         description: Server is online.
+ *         description: Avionics operational
  */
 app.get('/api/health', (req, res) => {
-  res.status(200).json({ status: 'UP', message: 'Backend is breathing!' });
+  res.status(200).json({ status: 'UP', message: 'All avionics systems nominal. Horizon-X is airborne and operational!' });
 });
 
 /**
- * @swagger
- * /api/test-seed:
+ * @openapi
+ * /api/flight-status:
  *   get:
- *     summary: Auto-initialize database environment records
- *     tags: [Utility APIs]
+ *     summary: Public Flight Status Radar (Departures & Arrivals)
+ *     description: Real-time public radar tracking flight status, scheduled departure, arrival, terminals, and gates. Requires NO user or admin authentication.
+ *     tags:
+ *       - Utility APIs
+ *     parameters:
+ *       - in: query
+ *         name: flightNumber
+ *         schema:
+ *           type: string
+ *         example: QP-1102
+ *       - in: query
+ *         name: origin
+ *         schema:
+ *           type: string
+ *         example: DEL
+ *       - in: query
+ *         name: destination
+ *         schema:
+ *           type: string
+ *         example: BOM
+ *       - in: query
+ *         name: date
+ *         schema:
+ *           type: string
+ *         example: "2026-11-14"
  *     responses:
  *       200:
- *         description: Seeding operations executed successfully.
+ *         description: Real-time flight status manifest
+ */
+app.get('/api/flight-status', flightStatusController.getPublicFlightStatus);
+app.get('/api/flights/status', flightStatusController.getPublicFlightStatus);
+
+/**
+ * @openapi
+ * /api/test-seed:
+ *   get:
+ *     summary: Trigger manual database seeding
+ *     tags:
+ *       - Utility APIs
+ *     responses:
+ *       200:
+ *         description: Flight database seeded successfully
+ *       500:
+ *         description: Seeding error details
  */
 app.get('/api/test-seed', async (req, res) => {
   try {
-    const locationCount = await Location.count();
-    if (locationCount === 0) {
-      await Location.bulkCreate(ACTIVE_AIRPORTS);
-      console.log(`✅ Successfully mapped ${ACTIVE_AIRPORTS.length} operational Indian airport sectors.`);
-    }
-
-    const airlineCount = await Airline.count();
-    if (airlineCount === 0) {
-      await Airline.bulkCreate(ACTIVE_AIRLINES);
-      console.log(`✅ Successfully mapped ${ACTIVE_AIRLINES.length} operational Indian airline services.`);
-    }
-
-    const flightCount = await Flight.count();
-    if (flightCount === 0) {
-      await Flight.bulkCreate([
-        { flightNumber: 'AI-805', airline: 'Air India', origin: 'DEL', destination: 'BOM', price: 5800.00 },
-        { flightNumber: '6E-2134', airline: 'IndiGo', origin: 'DEL', destination: 'BOM', price: 4200.00 }
-      ]);
-    }
-
-    res.json({ message: 'Horizon-X database sync completed smoothly.' });
+    await seedDatabase();
+    res.json({ message: 'Flight schedules and navigational routes synchronized successfully.' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
+/**
+ * @openapi
+ * /api/airports:
+ *   get:
+ *     summary: Retrieve operational airports (public)
+ *     description: Returns accessible airports for departure and arrival selections on flight booking forms.
+ *     tags:
+ *       - Utility APIs
+ *     responses:
+ *       200:
+ *         description: List of accessible airports
+ *       500:
+ *         description: Airport retrieval error
+ */
+app.get('/api/airports', async (req, res) => {
+  try {
+    const airports = await Location.findAll({ where: { isAccessible: true } });
+    res.status(200).json(airports);
+  } catch (error) {
+    res.status(500).json({ error: 'Unable to retrieve operational airport directory at this time. Please try again shortly.' });
+  }
+});
+
 // ==========================================
-// FOLDER 1: ADMIN PRIVILEGES
+// ADMIN PANEL (GROUND CONTROL)
 // ==========================================
 
 /**
- * @swagger
+ * @openapi
  * /api/admin/login:
  *   post:
- *     summary: Administrative operational clearance access entry portal
- *     tags: [Admin Privileges]
+ *     summary: Ground Control Admin authentication
+ *     tags:
+ *       - Admin Panel
  *     requestBody:
  *       required: true
  *       content:
@@ -182,98 +249,198 @@ app.get('/api/test-seed', async (req, res) => {
  *               - username
  *               - password
  *             properties:
- *               username: { type: string, example: "admin@horizonx.com" }
- *               password: { type: string, example: "AdminHorizonX2026!" }
+ *               username:
+ *                 type: string
+ *                 example: admin@horizonx.com
+ *               password:
+ *                 type: string
+ *                 example: Test@1234
  *     responses:
  *       200:
- *         description: Admin validation successful. Scoped token distributed.
- *       400:
- *         description: Credential match evaluation failed.
+ *         description: Ground Control access granted
+ *       401:
+ *         description: Ground Control clearance denied
  */
-app.post('/api/admin/login', (req, res) => {
-  const { username, password } = req.body;
+app.post('/api/admin/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
 
-  if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+    const isUsernameMatch = username === ADMIN_USERNAME;
+    const isPasswordMatch = isUsernameMatch && (await bcrypt.compare(password, await getAdminPwHash()));
+
+    if (!isUsernameMatch || !isPasswordMatch) {
+      return res.status(401).json({ error: 'Ground Control clearance denied: Invalid administrative credentials.' });
+    }
+
     const token = jwt.sign({ userId: 'system_root_admin', role: 'admin' }, JWT_SECRET, { expiresIn: '2h' });
-    return res.status(200).json({ message: 'Welcome Admin', token: `Bearer ${token}` });
+    return res.status(200).json({
+      message: 'Ground Control clearance granted. Welcome to Horizon-X Operations.',
+      token: `Bearer ${token}`
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Encountered unexpected ground control turbulence. Please try again shortly.' });
   }
-
-  res.status(400).json({ error: 'Invalid Admin Credentials' });
 });
 
 /**
- * @swagger
+ * @openapi
  * /api/cities:
  *   get:
- *     summary: See all operational cities map matrix
- *     tags: [Admin Privileges]
+ *     summary: Retrieve operational cities (Admin view)
+ *     tags:
+ *       - Admin Panel
  *     security:
  *       - BearerAuth: []
  *     responses:
  *       200:
- *         description: Vector array loaded.
+ *         description: Operational cities list
  */
 app.get('/api/cities', adminAuthMiddleware, async (req, res) => {
   try {
     const operationalCities = await Location.findAll({ where: { isAccessible: true } });
     res.status(200).json(operationalCities);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Unable to retrieve operational city directory.' });
   }
 });
 
 /**
- * @swagger
+ * @openapi
  * /api/flights:
  *   get:
- *     summary: See active operational internal flights grid
- *     tags: [Admin Privileges]
+ *     summary: Retrieve scheduled flights manifest (Admin view)
+ *     tags:
+ *       - Admin Panel
  *     security:
  *       - BearerAuth: []
  *     responses:
  *       200:
- *         description: Operations grid mapped successfully.
+ *         description: Scheduled flight schedules
  */
 app.get('/api/flights', adminAuthMiddleware, async (req, res) => {
   try {
-    const flights = await Flight.findAll();
+    const flights = await Flight.findAll({
+      include: ['airlineData', 'originData', 'destinationData']
+    });
     res.json(flights);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Unable to retrieve scheduled flight manifests.' });
   }
 });
 
 /**
- * @swagger
+ * @openapi
  * /api/users:
  *   get:
- *     summary: Get all onboarded consumer user profiles database mapping registry
- *     tags: [Admin Privileges]
+ *     summary: Retrieve registered passenger accounts (Admin view)
+ *     tags:
+ *       - Admin Panel
  *     security:
  *       - BearerAuth: []
  *     responses:
  *       200:
- *         description: Consumer mapping rows processed cleanly. Password components omitted.
+ *         description: Passenger manifest registry
  */
 app.get('/api/users', adminAuthMiddleware, async (req, res) => {
   try {
     const users = await User.findAll({ attributes: { exclude: ['password'] } });
     res.json(users);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Unable to retrieve passenger manifest records.' });
   }
 });
 
+/**
+ * @openapi
+ * /api/admin/fee-config:
+ *   get:
+ *     summary: Retrieve current fee configuration (Admin only)
+ *     description: Returns current cancellation and platform fees. Requires Ground Control Admin authorization.
+ *     tags:
+ *       - Admin Panel
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Current fee configuration
+ *       401:
+ *         description: Admin authorization required
+ */
+app.get('/api/admin/fee-config', adminAuthMiddleware, cancellationController.getFeeConfig);
+
+/**
+ * @openapi
+ * /api/admin/update-price:
+ *   put:
+ *     summary: Update global cancellation and platform fees (Admin only)
+ *     description: Ground Control Admin can set global cancellationFee and platformFee rendered across all users.
+ *     tags:
+ *       - Admin Panel
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - cancellationFee
+ *               - platformFee
+ *             properties:
+ *               cancellationFee:
+ *                 type: number
+ *                 example: 1200.00
+ *               platformFee:
+ *                 type: number
+ *                 example: 200.00
+ *     responses:
+ *       200:
+ *         description: Fee configuration updated successfully
+ *       401:
+ *         description: Admin authorization required
+ */
+app.put('/api/admin/update-price', adminAuthMiddleware, cancellationController.updateFeeConfig);
+app.post('/api/admin/update-price', adminAuthMiddleware, cancellationController.updateFeeConfig);
+
+/**
+ * @openapi
+ * /api/admin/bookings/{pnr}/complete:
+ *   put:
+ *     summary: Manually mark a booking/journey as completed (Admin only)
+ *     tags:
+ *       - Admin Panel
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: pnr
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Booking marked as completed
+ *       400:
+ *         description: Cannot mark cancelled booking
+ *       401:
+ *       403:
+ *         description: Admin authorization required
+ */
+app.put('/api/admin/bookings/:pnr/complete', adminAuthMiddleware, bookingController.markBookingCompleted);
+app.post('/api/admin/bookings/:pnr/complete', adminAuthMiddleware, bookingController.markBookingCompleted);
+
 // ==========================================
-// FOLDER 2: USER PRIVILEGES
+// USER PANEL (PASSENGER ONBOARDING & PROFILE)
 // ==========================================
 
 /**
- * @swagger
+ * @openapi
  * /api/auth/register:
  *   post:
- *     summary: Onboard new passenger user profiles into registry
- *     tags: [User privileges]
+ *     summary: Register a new passenger profile
+ *     tags:
+ *       - User Panel
  *     requestBody:
  *       required: true
  *       content:
@@ -282,73 +449,112 @@ app.get('/api/users', adminAuthMiddleware, async (req, res) => {
  *             type: object
  *             required:
  *               - firstName
+ *               - lastName
  *               - email
  *               - phone
  *               - password
+ *               - gender
+ *               - dob
+ *               - nationality
  *               - emailOtp
  *               - phoneOtp
  *             properties:
- *               firstName: { type: string, example: "Aarav" }
- *               lastName: { type: string, example: "Sharma" }
- *               email: { type: string, example: "aarav@horizonx.com" }
- *               phone: { type: string, example: "+919876543210" }
- *               password: { type: string, example: "FlyHighSecure123!" }
- *               gender: { type: string, example: "Male" }
- *               dob: { type: string, format: date, example: "1995-05-15" }
- *               nationality: { type: string, example: "Indian" }
- *               emailOtp: { type: string, example: "1111" }
- *               phoneOtp: { type: string, example: "2222" }
+ *               firstName:
+ *                 type: string
+ *                 example: John
+ *               lastName:
+ *                 type: string
+ *                 example: Doe
+ *               email:
+ *                 type: string
+ *                 example: john@example.com
+ *               phone:
+ *                 type: string
+ *                 example: "+919876543210"
+ *               password:
+ *                 type: string
+ *                 example: Password@123
+ *               gender:
+ *                 type: string
+ *                 example: MALE
+ *               dob:
+ *                 type: string
+ *                 example: "1995-05-15"
+ *               nationality:
+ *                 type: string
+ *                 example: Indian
+ *               emailOtp:
+ *                 type: string
+ *                 description: "Mock sandbox code — 1111"
+ *                 example: "1111"
+ *               phoneOtp:
+ *                 type: string
+ *                 description: "Mock sandbox code — 2222"
+ *                 example: "2222"
  *     responses:
  *       201:
- *         description: Profile setup operation complete.
+ *         description: Passenger onboarded successfully
+ *       400:
+ *         description: Security code verification error
+ *       409:
+ *         description: Passenger already registered
  */
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { firstName, lastName, email, phone, password, gender, dob, nationality, avatar, emailOtp, phoneOtp } = req.body;
+    const {
+      firstName, lastName, email, phone,
+      password, gender, dob, nationality, avatar,
+      emailOtp, phoneOtp
+    } = req.body;
 
+    // Static Mock OTP verification (1111 for Email, 2222 for Phone)
     if (!emailOtp || !phoneOtp || emailOtp.length !== 4 || phoneOtp.length !== 4) {
-      return res.status(400).json({ error: 'Registration rejected. Both Email and Phone OTPs are mandatory and must be exactly 4 digits.' });
+      return res.status(400).json({
+        error: 'Security clearance failed: Both your Email and Phone verification codes must be exactly 4 digits. (Sandbox clearance: Email 1111, Phone 2222)'
+      });
     }
-
     if (emailOtp === phoneOtp) {
-      return res.status(400).json({ error: 'Email OTP and Phone OTP cannot be the same.' });
+      return res.status(400).json({
+        error: 'Security protocol: Email and Phone verification codes must be distinct from each other.'
+      });
+    }
+    if (emailOtp !== MOCK_EMAIL_OTP || phoneOtp !== MOCK_PHONE_OTP) {
+      return res.status(401).json({
+        error: 'Security clearance failed: Incorrect verification codes. Please enter sandbox dispatch codes: 1111 for Email and 2222 for Phone.'
+      });
     }
 
-    if (emailOtp !== '1111' || phoneOtp !== '2222') {
-      return res.status(401).json({ error: 'Invalid verification codes provided for registration.' });
-    }
-
-    const existingUser = await User.findOne({ where: { [Op.or]: [{ email }, { phone }] } });
+    const existingUser = await User.findOne({
+      where: { [Op.or]: [{ email }, { phone }] }
+    });
     if (existingUser) {
-      return res.status(400).json({ error: 'Email or Phone Number is already registered.' });
+      return res.status(409).json({
+        error: 'Passenger manifest conflict: An account is already registered with this email address or contact number.'
+      });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-
     const newUser = await User.create({
-      firstName,
-      lastName,
-      email,
-      phone,
-      password: hashedPassword,
-      gender,
-      dob,
-      nationality,
-      avatar
+      firstName, lastName, email, phone,
+      password: hashedPassword, gender, dob, nationality, avatar
     });
 
-    res.status(201).json({ message: 'User onboarded successfully!', userId: newUser.id });
+    res.status(201).json({
+      message: 'Welcome aboard! Your Horizon-X passenger profile is officially registered and cleared for takeoff.',
+      userId: newUser.id
+    });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Encountered unexpected turbulence while creating your passenger profile. Please try again shortly.' });
   }
 });
 
 /**
- * @swagger
+ * @openapi
  * /api/auth/login:
  *   post:
- *     summary: Login with existing user credentials to build an authenticated session
- *     tags: [User privileges]
+ *     summary: Passenger login check-in
+ *     tags:
+ *       - User Panel
  *     requestBody:
  *       required: true
  *       content:
@@ -359,41 +565,51 @@ app.post('/api/auth/register', async (req, res) => {
  *               - identifier
  *               - password
  *             properties:
- *               identifier: { type: string, example: "aarav@horizonx.com" }
- *               password: { type: string, example: "FlyHighSecure123!" }
+ *               identifier:
+ *                 type: string
+ *                 example: john@example.com
+ *               password:
+ *                 type: string
+ *                 example: Password@123
  *     responses:
  *       200:
- *         description: Authentication successful. Token assigned.
+ *         description: Check-in authorization successful
+ *       401:
+ *         description: Credentials verification failed
  */
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { identifier, password } = req.body;
-
     if (!identifier || !password) {
-      return res.status(400).json({ error: 'Please provide complete credentials.' });
+      return res.status(400).json({ error: 'Boarding verification required: Please provide your email/phone and password to proceed.' });
     }
 
     const user = await User.findOne({
       where: { [Op.or]: [{ email: identifier }, { phone: identifier }] }
     });
-
     if (!user || !(await bcrypt.compare(password, user.password))) {
-      return res.status(401).json({ error: 'Invalid credentials.' });
+      return res.status(401).json({
+        error: 'Boarding authorization denied: Invalid credentials. Please verify your registered email/phone and password.'
+      });
     }
 
-    const token = jwt.sign({ userId: user.id, role: 'user' }, JWT_SECRET, { expiresIn: '1h' });
-    res.json({ message: 'Authentication successful!', token: `Bearer ${token}` });
+    const token = jwt.sign({ userId: user.id, role: 'user' }, JWT_SECRET, { expiresIn: '2h' });
+    res.json({
+      message: 'Identity verified. You are cleared for departure! Welcome back.',
+      token: `Bearer ${token}`
+    });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Encountered unexpected turbulence during check-in. Please try again shortly.' });
   }
 });
 
 /**
- * @swagger
+ * @openapi
  * /api/auth/forgot-password:
  *   post:
- *     summary: Initiate password recovery protocol verification codes (Public)
- *     tags: [User privileges]
+ *     summary: Request passenger password reset
+ *     tags:
+ *       - User Panel
  *     requestBody:
  *       required: true
  *       content:
@@ -403,32 +619,43 @@ app.post('/api/auth/login', async (req, res) => {
  *             required:
  *               - identifier
  *             properties:
- *               identifier: { type: string, example: "aarav@horizonx.com" }
+ *               identifier:
+ *                 type: string
+ *                 example: john@example.com
  *     responses:
  *       200:
- *         description: Account identified. Verification parameters sent.
+ *         description: Reset dispatch dispatched
+ *       404:
+ *         description: Passenger not found
  */
 app.post('/api/auth/forgot-password', async (req, res) => {
   try {
     const { identifier } = req.body;
-    const user = await User.findOne({ where: { [Op.or]: [{ email: identifier }, { phone: identifier }] } });
-    if (!user) return res.status(404).json({ error: 'No account matching that identifier was found.' });
+    const user = await User.findOne({
+      where: { [Op.or]: [{ email: identifier }, { phone: identifier }] }
+    });
+    if (!user) {
+      return res.status(404).json({
+        error: 'Flight manifest check: No passenger record found matching that email address or phone number.'
+      });
+    }
 
-    res.status(200).json({ 
-      message: 'Password reset initialization successful. OTP codes sent.',
-      info: 'Mock Notice: Use codes (Email: 1111, Phone: 2222) to overwrite password.'
+    res.status(200).json({
+      message: 'Password reset dispatch transmitted successfully. Please verify your security codes.',
+      info: 'Sandbox clearance: Use Email code 1111 and Phone code 2222 to set your new security password.'
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Encountered unexpected turbulence while processing your password reset.' });
   }
 });
 
 /**
- * @swagger
+ * @openapi
  * /api/auth/reset-password:
  *   post:
- *     summary: Overwrite historical user profile passwords via validated security tokens (Public)
- *     tags: [User privileges]
+ *     summary: Confirm password update with security verification codes
+ *     tags:
+ *       - User Panel
  *     requestBody:
  *       required: true
  *       content:
@@ -441,124 +668,209 @@ app.post('/api/auth/forgot-password', async (req, res) => {
  *               - phoneOtp
  *               - newPassword
  *             properties:
- *               identifier: { type: string, example: "aarav@horizonx.com" }
- *               emailOtp: { type: string, example: "1111" }
- *               phoneOtp: { type: string, example: "2222" }
- *               newPassword: { type: string, example: "BrandNewSecurePass2026!" }
+ *               identifier:
+ *                 type: string
+ *                 example: john@example.com
+ *               emailOtp:
+ *                 type: string
+ *                 example: "1111"
+ *               phoneOtp:
+ *                 type: string
+ *                 example: "2222"
+ *               newPassword:
+ *                 type: string
+ *                 example: NewPassword@123
  *     responses:
  *       200:
- *         description: Password updated successfully.
+ *         description: Password updated
+ *       401:
+ *         description: Security code mismatch
  */
 app.post('/api/auth/reset-password', async (req, res) => {
   try {
     const { identifier, emailOtp, phoneOtp, newPassword } = req.body;
-    if (emailOtp !== '1111' || phoneOtp !== '2222') return res.status(401).json({ error: 'Invalid verification security tokens.' });
 
-    const user = await User.findOne({ where: { [Op.or]: [{ email: identifier }, { phone: identifier }] } });
-    if (!user) return res.status(404).json({ error: 'User profile mapping targets missing.' });
+    if (emailOtp !== MOCK_EMAIL_OTP || phoneOtp !== MOCK_PHONE_OTP) {
+      return res.status(401).json({
+        error: 'Security clearance failed: Verification codes do not match our dispatch records. (Sandbox clearance: Email 1111, Phone 2222)'
+      });
+    }
+
+    const user = await User.findOne({
+      where: { [Op.or]: [{ email: identifier }, { phone: identifier }] }
+    });
+    if (!user) {
+      return res.status(404).json({ error: 'Flight manifest check: No passenger record found matching that identifier.' });
+    }
 
     user.password = await bcrypt.hash(newPassword, 10);
     await user.save();
-    res.status(200).json({ message: 'Password recovery execution completed.' });
+
+    res.status(200).json({
+      message: 'Security credentials updated successfully. You may now proceed to check in with your new password.'
+    });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Encountered unexpected turbulence while updating your security credentials.' });
   }
 });
 
 /**
- * @swagger
+ * @openapi
  * /api/users/profile:
  *   get:
- *     summary: Get onboarded user profile data for active session
- *     tags: [User privileges]
+ *     summary: Retrieve passenger profile details
+ *     tags:
+ *       - User Panel
  *     security:
  *       - BearerAuth: []
  *     responses:
  *       200:
- *         description: Structural tracking items successfully loaded.
+ *         description: Passenger profile
+ *       404:
+ *         description: Profile not found
  */
 app.get('/api/users/profile', authMiddleware, async (req, res) => {
   try {
-    const user = await User.findByPk(req.user.userId, { attributes: { exclude: ['password'] } });
-    if (!user) return res.status(404).json({ error: 'User profile not found.' });
+    const user = await User.findByPk(req.user.userId, {
+      attributes: { exclude: ['password'] }
+    });
+    if (!user) return res.status(404).json({ error: 'Passenger profile not found in flight manifest.' });
     res.json(user);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Encountered unexpected turbulence while loading your passenger profile.' });
   }
 });
 
 /**
- * @swagger
+ * @openapi
+ * /api/users/wallet:
+ *   get:
+ *     summary: Retrieve passenger wallet balance (Horizon-X credits)
+ *     tags:
+ *       - User Panel
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Current wallet balance
+ *       404:
+ *         description: Passenger not found
+ */
+app.get('/api/users/wallet', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findByPk(req.user.userId, {
+      attributes: ['id', 'firstName', 'lastName', 'email', 'walletBalance']
+    });
+    if (!user) return res.status(404).json({ error: 'Passenger profile not found in flight manifest.' });
+    res.status(200).json({
+      success: true,
+      data: {
+        userId: user.id,
+        passengerName: `${user.firstName} ${user.lastName}`,
+        walletBalance: Number(user.walletBalance || 0),
+        currency: 'INR'
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Encountered unexpected turbulence while loading your passenger wallet.' });
+  }
+});
+
+/**
+ * @openapi
  * /api/users/profile:
  *   put:
- *     summary: Update user profile metrics configuration data (Includes Secure Password Change)
- *     tags: [User privileges]
+ *     summary: Update passenger profile details
+ *     tags:
+ *       - User Panel
  *     security:
  *       - BearerAuth: []
  *     requestBody:
+ *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
  *             properties:
- *               firstName: { type: string }
- *               lastName: { type: string }
- *               oldPassword: { type: string }
- *               newPassword: { type: string }
- *               confirmNewPassword: { type: string }
+ *               firstName:
+ *                 type: string
+ *               lastName:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *               phone:
+ *                 type: string
+ *               oldPassword:
+ *                 type: string
+ *               newPassword:
+ *                 type: string
+ *               confirmNewPassword:
+ *                 type: string
  *     responses:
  *       200:
- *         description: Profile entries successfully modified.
+ *         description: Profile updated
  */
 app.put('/api/users/profile', authMiddleware, async (req, res) => {
   try {
-    const { firstName, lastName, email, phone, oldPassword, newPassword, confirmNewPassword, gender, dob, nationality, avatar } = req.body;
+    const {
+      firstName, lastName, email, phone,
+      oldPassword, newPassword, confirmNewPassword,
+      gender, dob, nationality, avatar
+    } = req.body;
+
     const user = await User.findByPk(req.user.userId);
-    if (!user) return res.status(404).json({ error: 'User profile not found.' });
+    if (!user) return res.status(404).json({ error: 'Passenger profile not found in flight manifest.' });
 
     if (email && email !== user.email) {
-      const duplicateEmail = await User.findOne({ where: { email } });
-      if (duplicateEmail) return res.status(400).json({ error: 'Email variant allocated already.' });
+      const duplicate = await User.findOne({ where: { email } });
+      if (duplicate) return res.status(409).json({ error: 'Passenger manifest conflict: That email address is already allocated to another passenger.' });
       user.email = email;
     }
     if (phone && phone !== user.phone) {
-      const duplicatePhone = await User.findOne({ where: { phone } });
-      if (duplicatePhone) return res.status(400).json({ error: 'Phone contact allocated already.' });
+      const duplicate = await User.findOne({ where: { phone } });
+      if (duplicate) return res.status(409).json({ error: 'Passenger manifest conflict: That phone number is already allocated to another passenger.' });
       user.phone = phone;
     }
 
-    if (firstName) user.firstName = firstName;
-    if (lastName) user.lastName = lastName;
-    if (gender) user.gender = gender;
-    if (dob) user.dob = dob;
+    if (firstName)   user.firstName   = firstName;
+    if (lastName)    user.lastName    = lastName;
+    if (gender)      user.gender      = gender;
+    if (dob)         user.dob         = dob;
     if (nationality) user.nationality = nationality;
-    if (avatar) user.avatar = avatar;
+    if (avatar)      user.avatar      = avatar;
 
     if (newPassword) {
       if (!oldPassword || !confirmNewPassword) {
-        return res.status(400).json({ error: 'Altering credentials requires oldPassword, newPassword, and confirmNewPassword fields.' });
+        return res.status(400).json({
+          error: 'Security update required: To update your password, please provide your current password, new password, and confirmation.'
+        });
       }
-      if (newPassword !== confirmNewPassword) return res.status(400).json({ error: 'New password entries do not match.' });
-      
+      if (newPassword !== confirmNewPassword) {
+        return res.status(400).json({ error: 'Password confirmation mismatch: New password entries do not match.' });
+      }
       const isMatch = await bcrypt.compare(oldPassword, user.password);
-      if (!isMatch) return res.status(401).json({ error: 'The old password provided does not match our records.' });
-
+      if (!isMatch) {
+        return res.status(401).json({ error: 'Security verification failed: Current password does not match our flight records.' });
+      }
       user.password = await bcrypt.hash(newPassword, 10);
     }
 
     await user.save();
-    res.status(200).json({ message: 'User profile successfully altered.' });
+    res.status(200).json({ message: 'Passenger profile details updated successfully.' });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Encountered unexpected turbulence while updating your passenger profile.' });
   }
 });
 
 /**
- * @swagger
+ * @openapi
  * /api/users:
  *   delete:
- *     summary: Delete an existing user profile and associated records
- *     tags: [User privileges]
+ *     summary: Permanently decommission passenger account
+ *     tags:
+ *       - User Panel
+ *     security:
+ *       - BearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -566,96 +878,44 @@ app.put('/api/users/profile', authMiddleware, async (req, res) => {
  *           schema:
  *             type: object
  *             required:
- *               - identifier
  *               - password
  *               - delete
  *             properties:
- *               identifier: { type: string, example: "aarav@horizonx.com" }
- *               password: { type: string, example: "FlyHighSecure123!" }
- *               delete: { type: boolean, example: true }
+ *               password:
+ *                 type: string
+ *               delete:
+ *                 type: boolean
+ *                 example: true
  *     responses:
  *       200:
- *         description: Data item cleared.
+ *         description: Account closed
  */
-app.delete('/api/users', async (req, res) => {
+app.delete('/api/users', authMiddleware, async (req, res) => {
   try {
-    const { identifier, password, delete: confirmDelete } = req.body;
-    if (confirmDelete !== true) return res.status(400).json({ error: 'Toggle parameter must evaluate to true.' });
+    const { password, delete: confirmDelete } = req.body;
 
-    const user = await User.findOne({ where: { [Op.or]: [{ email: identifier }, { phone: identifier }] } });
-    if (!user || !(await bcrypt.compare(password, user.password))) {
-      return res.status(401).json({ error: 'Authentication signature validation mismatch.' });
+    if (confirmDelete !== true) {
+      return res.status(400).json({
+        error: 'De-registration safety check: Confirmation toggle must evaluate to true to decommission your passenger profile.'
+      });
+    }
+
+    const user = await User.findByPk(req.user.userId);
+    if (!user) return res.status(404).json({ error: 'Passenger profile not found in flight manifest.' });
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({
+        error: 'Security verification failed: Incorrect password. Account decommissioning halted.'
+      });
     }
 
     await user.destroy();
-    res.status(200).json({ message: "We're sorry to see you go. Record erased." });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-/**
- * @swagger
- * /api/itinerary:
- *   get:
- *     summary: Search for available flight options based on itinerary parameters
- *     tags: [User privileges]
- *     parameters:
- *       - in: query
- *         name: itinerary
- *         required: true
- *         schema: { type: string }
- *         description: "Sector connection format (e.g., DEL-BOM)"
- *       - in: query
- *         name: tripType
- *         required: true
- *         schema: { type: string, enum: [oneway, roundtrip, multicity] }
- *       - in: query
- *         name: paxType
- *         required: true
- *         schema: { type: string }
- *         description: "Passenger configuration layout (Format: A-1_C-0_I-0)"
- *       - in: query
- *         name: cabinClass
- *         required: true
- *         schema: { type: string, enum: [economy, premium-economy, business] }
- *     responses:
- *       200:
- *         description: Search evaluations compiled successfully.
- */
-app.get('/api/itinerary', async (req, res) => {
-  try {
-    const { itinerary, tripType, paxType, cabinClass } = req.query;
-    if (!itinerary || !tripType || !paxType || !cabinClass) return res.status(400).json({ error: 'Missing parameters.' });
-
-    const parts = paxType.split('_');
-    const adults = parseInt(parts[0].split('-')[1], 10);
-    const children = parseInt(parts[1].split('-')[1], 10);
-    const infants = parseInt(parts[2].split('-')[1], 10);
-
-    if (adults < 1 || infants > adults) return res.status(400).json({ error: 'Passenger limits evaluation error.' });
-
-    const [origin, destination] = itinerary.split('-');
-    const availableFlights = await Flight.findAll({ where: { origin: origin.toUpperCase(), destination: destination.toUpperCase() } });
-
-    let priceMultiplier = 1.0;
-    if (cabinClass === 'premium-economy') priceMultiplier = 1.4;
-    if (cabinClass === 'business') priceMultiplier = 2.5;
-
-    const mappedItineraryOptions = availableFlights.map(flight => {
-      const baseFarePerSeat = parseFloat(flight.price) * priceMultiplier;
-      return {
-        flightNumber: flight.flightNumber,
-        airline: flight.airline,
-        sector: `${flight.origin}-${flight.destination}`,
-        cabinClass,
-        fareMetrics: { baseFarePerSeat: baseFarePerSeat.toFixed(2), totalCalculatedItineraryCost: (baseFarePerSeat * (adults + children)).toFixed(2) }
-      };
+    res.status(200).json({
+      message: 'Your Horizon-X passenger account has been decommissioned. We hope to welcome you aboard again in the future.'
     });
-
-    res.status(200).json({ optionsAvailable: mappedItineraryOptions });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Encountered unexpected turbulence while decommissioning your account.' });
   }
 });
 
@@ -665,10 +925,24 @@ app.get('/api/itinerary', async (req, res) => {
 if (process.env.NODE_ENV !== 'test') {
   sequelize.sync({ force: false })
     .then(async () => {
-      await seedDatabase(); 
-      app.listen(PORT, () => console.log(`🚀 Horizon-X Engine live on http://localhost:${PORT}`));
+      console.log('✅ Aviation database structures synchronised.');
+
+      const cityCount = await Location.count();
+      if (cityCount === 0) {
+        console.log('🌱 Flight database empty — running automatic flight schedule seeder...');
+        await seedDatabase();
+        console.log('✅ Flight database loaded. All boarding gates are open.');
+      } else {
+        console.log(`ℹ️  Horizon-X operational with ${cityCount} airports loaded.`);
+      }
+
+      await seedCancellationDefaults();
+
+      app.listen(PORT, () => {
+        console.log(`🚀 Horizon-X Engine airborne on http://localhost:${PORT}`);
+      });
     })
-    .catch(err => console.error('Database configuration sync failed:', err));
+    .catch(err => console.error('❌ Database bootstrap failed:', err));
 }
 
 module.exports = app;
