@@ -57,5 +57,6 @@ router.get('/:pnr', checkoutController.getBookingByPnr);
  */
 router.put('/:pnr/complete', bookingController.markBookingCompleted);
 router.post('/:pnr/complete', bookingController.markBookingCompleted);
+router.delete('/:pnr', bookingController.deleteBooking);
 
 module.exports = router;

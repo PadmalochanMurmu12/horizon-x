@@ -319,6 +319,13 @@ async function markBookingCompleted(req, res) {
       });
     }
 
+    if (!booking.isCheckedIn) {
+      return res.status(400).json({
+        success: false,
+        error: `Action denied: Flight reservation PNR ${formattedPnr} cannot be marked as COMPLETED because the passenger has not completed web check-in.`
+      });
+    }
+
     if (booking.status === 'COMPLETED') {
       return res.status(200).json({
         success: true,
@@ -336,7 +343,7 @@ async function markBookingCompleted(req, res) {
 
     return res.status(200).json({
       success: true,
-      message: `Flight reservation PNR ${formattedPnr} has been successfully marked as COMPLETED by Ground Control Admin.`,
+      message: `Flight reservation PNR ${formattedPnr} has been successfully marked as COMPLETED.`,
       data: {
         pnr: booking.pnr,
         status: booking.status,
@@ -354,9 +361,53 @@ async function markBookingCompleted(req, res) {
   }
 }
 
+/**
+ * Permanently deletes a completed booking record from the database to keep the DB size lightweight.
+ * Blocked for scheduled/confirmed journeys.
+ */
+async function deleteBooking(req, res) {
+  try {
+    const { pnr } = req.params;
+    const formattedPnr = pnr?.trim().toUpperCase();
+
+    const booking = await Booking.findOne({
+      where: { pnr: formattedPnr }
+    });
+
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        error: `Flight manifest check: No reservation found matching PNR ${formattedPnr}.`
+      });
+    }
+
+    if (booking.status !== 'COMPLETED') {
+      return res.status(400).json({
+        success: false,
+        error: `Action denied: Only COMPLETED journeys can be purged from the records. Current status: ${booking.status}.`
+      });
+    }
+
+    await BookingPassenger.destroy({ where: { bookingId: booking.id } });
+    await booking.destroy();
+
+    return res.status(200).json({
+      success: true,
+      message: `Completed journey for PNR ${formattedPnr} has been permanently deleted from records.`
+    });
+  } catch (error) {
+    console.error('Delete Booking Error:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Unable to delete booking record at this time.'
+    });
+  }
+}
+
 module.exports = {
   getMyBookings,
   getETicket,
   getBoardingPass,
-  markBookingCompleted
+  markBookingCompleted,
+  deleteBooking
 };

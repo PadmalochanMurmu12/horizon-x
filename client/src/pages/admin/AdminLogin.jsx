@@ -12,6 +12,9 @@ export default function AdminLogin({ token, setToken }) {
   const [errorMsg, setErrorMsg] = useState('');
   const navigate = useNavigate();
 
+  const searchParams = new URLSearchParams(window.location.search);
+  const isExpired = searchParams.get('expired') === '1';
+
   // Route Guard: Prevent access to login screen if session is already active
   useEffect(() => {
     if (token && status === 'idle') {
@@ -39,7 +42,7 @@ export default function AdminLogin({ token, setToken }) {
       // 3. Trigger High-Fidelity Crash sequence with violent impact & comic explosion
       setStatus('crash');
       setTimeout(() => {
-        setErrorMsg(err.response?.data?.error || 'Authentication Refused: Invalid Master Credentials');
+        setErrorMsg(err.response?.data?.error || 'Authentication Failed: Invalid Email or Password');
         setStatus('idle');
       }, 2500);
     }
@@ -101,10 +104,10 @@ export default function AdminLogin({ token, setToken }) {
           <div className="absolute top-16 left-1/2 -translate-x-1/2 text-center font-mono">
             <div className="text-xs uppercase tracking-[0.3em] text-blue-400 font-bold mb-1 flex items-center justify-center gap-2">
               <Compass size={14} className="animate-spin" />
-              <span>ASCENT PROFILE ENGAGED • HORIZON-X CORE</span>
+              <span>CLEARED FOR TAKEOFF • RUNWAY 09R</span>
             </div>
             <p className="text-[10px] text-slate-400 tracking-widest uppercase">
-              Speed: Accelerating &bull; Pitch: +28&deg; &bull; Telemetry: Verified
+              Status: Airborne &bull; Ascent: Normal &bull; Flight: Active
             </p>
           </div>
         </div>
@@ -174,7 +177,7 @@ export default function AdminLogin({ token, setToken }) {
             {/* Alarm Status Banner */}
             <div className="absolute bottom-4 text-center font-mono text-[11px] font-bold text-red-400 tracking-widest uppercase flex items-center gap-1.5">
               <Flame size={14} className="text-red-500 animate-bounce" />
-              <span>STALL WARNING • GROUND IMPACT AT RUNWAY 09R</span>
+              <span>LOGIN FAILED • INVALID CREDENTIALS</span>
             </div>
 
           </div>
@@ -198,10 +201,18 @@ export default function AdminLogin({ token, setToken }) {
             HORIZON<span className="text-blue-600 dark:text-blue-400">-</span>X
           </h2>
           <p className="text-[10px] text-slate-400 dark:text-slate-500 font-mono tracking-widest mt-1 uppercase">
-            Flight Operations Control Desk
+            Admin Panel
           </p>
         </div>
         
+        {/* Session Expired Notice Banner */}
+        {isExpired && !errorMsg && (
+          <div className="flex items-center gap-3 bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-900/70 text-amber-800 dark:text-amber-300 p-4 rounded-xl mb-6 text-xs font-mono tracking-wide shadow-sm animate-fadeIn">
+            <AlertTriangle size={16} className="text-amber-600 dark:text-amber-400 shrink-0" />
+            <span>Your operations session has expired. Please sign in again to access the operations cockpit.</span>
+          </div>
+        )}
+
         {/* Error Alert Banner */}
         {errorMsg && (
           <div className="flex items-center gap-3 bg-red-50 dark:bg-red-950/60 border border-red-100 dark:border-red-900/70 text-red-700 dark:text-red-300 p-4 rounded-xl mb-6 text-xs font-mono tracking-wide shadow-sm animate-fadeIn">
@@ -214,7 +225,7 @@ export default function AdminLogin({ token, setToken }) {
         <form onSubmit={handleSignIn} className="space-y-5">
           <div>
             <label className="block text-[10px] font-mono uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400 mb-2 font-bold">
-              Access Identifier (Username)
+              Email Address
             </label>
             <div className="relative">
               <User size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
@@ -231,7 +242,7 @@ export default function AdminLogin({ token, setToken }) {
 
           <div>
             <label className="block text-[10px] font-mono uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400 mb-2 font-bold">
-              Master Flight Clearance (Password)
+              Password
             </label>
             <div className="relative">
               <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
@@ -251,8 +262,8 @@ export default function AdminLogin({ token, setToken }) {
             disabled={status !== 'idle'} 
             className="w-full mt-2 bg-slate-900 hover:bg-slate-800 dark:bg-blue-600 dark:hover:bg-blue-500 text-white py-3.5 rounded-xl text-xs font-bold uppercase tracking-[0.15em] shadow-md hover:shadow-lg disabled:opacity-50 transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer"
           >
-            <span>Authorize Flight Clearance</span>
-            <Plane size={13} className="rotate-90 translate-y-[-0.5px]" />
+            <span>Enter Cockpit</span>
+            <Plane size={13} className="rotate-0 translate-y-[-0.5px]" />
           </button>
         </form>
       </div>

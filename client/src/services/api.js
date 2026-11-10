@@ -18,9 +18,13 @@ export const ADMIN_ENDPOINTS = {
 
   // Operations & Hub Telemetry
   CITIES: `${API_BASE_URL}/cities`,
+  AIRPORTS: `${API_BASE_URL}/airports`,
+  AIRLINES: `${API_BASE_URL}/airlines`,
   FLIGHTS: `${API_BASE_URL}/flights`,
+  UPDATE_FLIGHT_STATUS: (id) => `${API_BASE_URL}/admin/flights/${encodeURIComponent(id)}/status`,
   USERS: `${API_BASE_URL}/users`,
   BOOKINGS: `${API_BASE_URL}/bookings`,
+  DELETE_BOOKING: (pnr) => `${API_BASE_URL}/admin/bookings/${encodeURIComponent(pnr)}`,
 
   // Fare & Fee Engine Configuration
   FEE_CONFIG: `${API_BASE_URL}/admin/fee-config`,
@@ -123,6 +127,23 @@ export const adminApi = {
   updateFeeConfig: async (payload, token) => {
     const config = { headers: { Authorization: token || sessionStorage.getItem('hx_admin_token') } };
     const res = await axios.put(ADMIN_ENDPOINTS.UPDATE_PRICE, payload, config);
+    return res.data;
+  },
+
+  getAirlines: async () => {
+    const res = await axios.get(ADMIN_ENDPOINTS.AIRLINES);
+    return res.data;
+  },
+
+  updateFlightStatus: async (flightId, status, token) => {
+    const config = { headers: { Authorization: token || sessionStorage.getItem('hx_admin_token') } };
+    const res = await axios.put(ADMIN_ENDPOINTS.UPDATE_FLIGHT_STATUS(flightId), { status }, config);
+    return res.data;
+  },
+
+  deleteBooking: async (pnr, token) => {
+    const config = { headers: { Authorization: token || sessionStorage.getItem('hx_admin_token') } };
+    const res = await axios.delete(ADMIN_ENDPOINTS.DELETE_BOOKING(pnr), config);
     return res.data;
   }
 };
