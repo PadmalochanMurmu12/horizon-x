@@ -542,6 +542,19 @@ app.post('/api/auth/register', async (req, res) => {
       emailOtp, phoneOtp
     } = req.body;
 
+    // Positive & Negative Input Validation
+    if (!firstName || !lastName || !email || !phone || !password) {
+      return res.status(400).json({
+        error: 'Passenger profile requirement: First name, last name, email, phone number, and password are required.'
+      });
+    }
+
+    if (password.length < 8 || !/\d/.test(password)) {
+      return res.status(400).json({
+        error: 'Password security requirement: Minimum 8 characters with at least one numeric digit.'
+      });
+    }
+
     // Static Mock OTP verification (1111 for Email, 2222 for Phone)
     if (!emailOtp || !phoneOtp || emailOtp.length !== 4 || phoneOtp.length !== 4) {
       return res.status(400).json({
