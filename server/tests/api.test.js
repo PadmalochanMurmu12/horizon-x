@@ -21,9 +21,14 @@ beforeAll(async () => {
   }
   await seedCancellationDefaults();
 
-  // Find a valid scheduled flight for booking tests
+  // Find a valid upcoming scheduled flight for booking tests
+  const { Op } = require('sequelize');
   flightToBook = await Flight.findOne({
-    where: { status: 'SCHEDULED' },
+    where: { 
+      status: 'SCHEDULED',
+      scheduledDeparture: { [Op.gt]: new Date() }
+    },
+    order: [['scheduledDeparture', 'ASC']],
     include: [{ model: FlightFare, as: 'fares' }]
   });
 

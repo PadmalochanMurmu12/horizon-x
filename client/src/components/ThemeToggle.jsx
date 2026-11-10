@@ -27,7 +27,7 @@ export default function ThemeToggle({ className = '', showLabel = false }) {
 
       {showLabel && (
         <span className="uppercase tracking-wider text-[11px]">
-          {isDark ? 'Light Ops' : 'Dark Ops'}
+          {isDark ? 'Light Mode' : 'Dark Mode'}
         </span>
       )}
     </button>

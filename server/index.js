@@ -328,6 +328,40 @@ app.get('/api/flights', adminAuthMiddleware, async (req, res) => {
   }
 });
 
+const updateFlightStatusHandler = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    const validStatuses = ['SCHEDULED', 'DELAYED', 'CANCELLED', 'COMPLETED'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid flight status: ${status}. Must be one of: ${validStatuses.join(', ')}`
+      });
+    }
+
+    const flight = await Flight.findByPk(id);
+    if (!flight) {
+      return res.status(404).json({ success: false, error: 'Flight record not found.' });
+    }
+
+    flight.status = status;
+    await flight.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `Flight ${flight.flightNumber} status has been updated to ${status}.`,
+      data: flight
+    });
+  } catch (error) {
+    console.error('Update Flight Status Error:', error);
+    return res.status(500).json({ success: false, error: 'Failed to update flight status.' });
+  }
+};
+
+app.put('/api/admin/flights/:id/status', adminAuthMiddleware, updateFlightStatusHandler);
+app.put('/api/flights/:id/status', adminAuthMiddleware, updateFlightStatusHandler);
+
 /**
  * @openapi
  * /api/users:
@@ -429,6 +463,7 @@ app.post('/api/admin/update-price', adminAuthMiddleware, cancellationController.
  */
 app.put('/api/admin/bookings/:pnr/complete', adminAuthMiddleware, bookingController.markBookingCompleted);
 app.post('/api/admin/bookings/:pnr/complete', adminAuthMiddleware, bookingController.markBookingCompleted);
+app.delete('/api/admin/bookings/:pnr', adminAuthMiddleware, bookingController.deleteBooking);
 
 // ==========================================
 // USER PANEL (PASSENGER ONBOARDING & PROFILE)
