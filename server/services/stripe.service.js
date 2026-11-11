@@ -21,7 +21,7 @@ function getStripeInstance() {
  * Creates a Stripe Checkout Session for flight ticket purchases.
  * Enforces one-shot payment (no EMIs) as per specification.
  */
-async function createStripeSession({ booking, passengers, legs, clientBaseUrl }) {
+async function createStripeSession({ booking, passengers, legs, clientBaseUrl, platformFee }) {
   const stripeClient = getStripeInstance();
   const originUrl = clientBaseUrl || process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 
@@ -49,6 +49,21 @@ async function createStripeSession({ booking, passengers, legs, clientBaseUrl })
       };
     });
 
+    // Add Convenience & Platform Fee line item
+    if (platformFee && Number(platformFee) > 0) {
+      line_items.push({
+        price_data: {
+          currency: (booking.currency || 'INR').toLowerCase(),
+          product_data: {
+            name: 'Convenience & Platform Fee',
+            description: 'Ground Control booking clearance and security infrastructure fee'
+          },
+          unit_amount: Math.round(Number(platformFee) * 100),
+        },
+        quantity: 1,
+      });
+    }
+
     const session = await stripeClient.checkout.sessions.create({
       line_items,
       mode: 'payment', // One-shot payment only
@@ -62,7 +77,7 @@ async function createStripeSession({ booking, passengers, legs, clientBaseUrl })
         passengerCount: String(passengers.length)
       },
       success_url: `${originUrl}/booking/success?pnr=${booking.pnr}&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${originUrl}/booking/cancelled?pnr=${booking.pnr}`,
+      cancel_url: `${originUrl}/checkout?cancelled=true&pnr=${booking.pnr}`,
     });
 
     return {

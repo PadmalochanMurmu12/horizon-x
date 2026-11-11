@@ -241,9 +241,18 @@ export default function AdminLogin({ token, setToken }) {
           </div>
 
           <div>
-            <label className="block text-[10px] font-mono uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400 mb-2 font-bold">
-              Password
-            </label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-[10px] font-mono uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400 font-bold">
+                Password
+              </label>
+              <button
+                type="button"
+                onClick={() => navigate('/admin/forgot-password')}
+                className="text-[11px] font-mono text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+              >
+                Forgot Password?
+              </button>
+            </div>
             <div className="relative">
               <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
               <input 
@@ -267,6 +276,25 @@ export default function AdminLogin({ token, setToken }) {
           </button>
         </form>
       </div>
+
+      {/* ==========================================
+         COMPACT SLEEK FOOTER
+         ========================================== */}
+      <footer className="absolute bottom-0 left-0 right-0 z-20 py-2.5 px-6 bg-white/95 dark:bg-slate-950/85 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 transition-colors">
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-2 text-[11px] text-slate-700 dark:text-slate-300 font-medium">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-[#005cab] dark:text-blue-400">
+              Horizon<span className="text-blue-500">-X</span>
+            </span>
+            <span>© 2026 Horizon-X Ground Control. All rights reserved.</span>
+          </div>
+          <div className="flex gap-4 sm:gap-6">
+            <a href="#" className="hover:text-[#005cab] dark:hover:text-blue-400 transition-colors">Operations Manual</a>
+            <a href="#" className="hover:text-[#005cab] dark:hover:text-blue-400 transition-colors">Security Policy</a>
+            <a href="#" className="hover:text-[#005cab] dark:hover:text-blue-400 transition-colors">Support</a>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

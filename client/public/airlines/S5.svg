@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160">
+  <defs>
+    <linearGradient id="starBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0B2356" />
+      <stop offset="100%" stop-color="#184285" />
+    </linearGradient>
+    <linearGradient id="starRed" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF385C" />
+      <stop offset="100%" stop-color="#D91438" />
+    </linearGradient>
+  </defs>
+  <!-- Background Container -->
+  <rect width="160" height="160" rx="34" fill="url(#starBg)" />
+  
+  <!-- Outer Guiding Flare Glow -->
+  <circle cx="80" cy="80" r="54" fill="#FFFFFF" opacity="0.05" />
+
+  <!-- Dynamic Aerodynamic Star Emblem (Sanjay Ghodawat Star Air Emblem) -->
+  <g transform="translate(80, 78)">
+    <!-- Primary Cardinal Wings (Red) -->
+    <!-- Top Point -->
+    <polygon points="0,-52 11,-16 0,-20" fill="url(#starRed)" />
+    <polygon points="0,-52 -11,-16 0,-20" fill="#B91C1C" />
+    
+    <!-- Right Point -->
+    <polygon points="52,0 16,11 20,0" fill="url(#starRed)" />
+    <polygon points="52,0 16,-11 20,0" fill="#B91C1C" />
+
+    <!-- Bottom Point -->
+    <polygon points="0,52 -11,16 0,20" fill="url(#starRed)" />
+    <polygon points="0,52 11,16 0,20" fill="#B91C1C" />
+
+    <!-- Left Point -->
+    <polygon points="-52,0 -16,-11 -20,0" fill="url(#starRed)" />
+    <polygon points="-52,0 -16,11 -20,0" fill="#B91C1C" />
+
+    <!-- Diagonal Rays (Crisp White Navigation Points) -->
+    <!-- Top-Right -->
+    <polygon points="34,-34 7,-14 14,-7" fill="#FFFFFF" opacity="0.95" />
+    <!-- Bottom-Right -->
+    <polygon points="34,34 14,7 7,14" fill="#E2E8F0" opacity="0.9" />
+    <!-- Bottom-Left -->
+    <polygon points="-34,34 -7,14 -14,7" fill="#CBD5E1" opacity="0.85" />
+    <!-- Top-Left -->
+    <polygon points="-34,-34 -14,-7 -7,-14" fill="#FFFFFF" opacity="0.95" />
+
+    <!-- Central Diamond Core -->
+    <circle cx="0" cy="0" r="7" fill="#FFFFFF" />
+  </g>
+</svg>
