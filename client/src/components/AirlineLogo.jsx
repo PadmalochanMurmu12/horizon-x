@@ -5,17 +5,17 @@ import React, { useState } from 'react';
  * Uses official carrier icons and emblems with graceful fallback.
  */
 const LOGO_MAP = {
-  '6E': '/airlines/6E.png?v=2',
-  'AI': '/airlines/AI.png?v=2',
-  'IX': '/airlines/IX.svg?v=2',
-  'QP': '/airlines/QP.svg?v=2',
-  'SG': '/airlines/SG.png?v=2',
-  '9I': '/airlines/9I.png?v=2',
-  'S5': '/airlines/S5.png?v=2',
-  'IC': '/airlines/IC.png?v=2',
-  'I7': '/airlines/I7.jpg?v=2',
-  'Z0': '/airlines/Z0.png?v=2',
-  'G8': '/airlines/G8.png?v=2',
+  '6E': '/airlines/6E.png?v=3',
+  'AI': '/airlines/AI.png?v=3',
+  'IX': '/airlines/IX.svg?v=3',
+  'QP': '/airlines/QP.svg?v=3',
+  'SG': '/airlines/SG.png?v=3',
+  '9I': '/airlines/9I.png?v=3',
+  'S5': '/airlines/S5.svg?v=3',
+  'IC': '/airlines/IC.png?v=3',
+  'I7': '/airlines/I7.jpg?v=3',
+  'Z0': '/airlines/Z0.png?v=3',
+  'G8': '/airlines/G8.svg?v=3',
 };
 
 function resolveAirlineCode(code = '', name = '') {
@@ -38,16 +38,39 @@ function resolveAirlineCode(code = '', name = '') {
   return c;
 }
 
-export default function AirlineLogo({ code = '', name = '', size = 28, className = '' }) {
+export default function AirlineLogo({ 
+  code = '', 
+  carrierCode = '', 
+  airlineCode = '', 
+  name = '', 
+  carrierName = '', 
+  airlineName = '', 
+  size = 28, 
+  className = '' 
+}) {
   const [hasError, setHasError] = useState(false);
-  const resolvedCode = resolveAirlineCode(code, name);
+  const effectiveCode = code || carrierCode || airlineCode || '';
+  const effectiveName = name || carrierName || airlineName || '';
+  const resolvedCode = resolveAirlineCode(effectiveCode, effectiveName);
   const logoSrc = LOGO_MAP[resolvedCode];
 
+  let pixelSize = size;
+  if (typeof size === 'string') {
+    if (size === 'sm') pixelSize = 24;
+    else if (size === 'md') pixelSize = 36;
+    else if (size === 'lg') pixelSize = 48;
+    else if (size === 'xl') pixelSize = 56;
+    else {
+      const parsed = parseInt(size, 10);
+      pixelSize = isNaN(parsed) ? 28 : parsed;
+    }
+  }
+
   const containerStyle = {
-    width: size,
-    height: size,
-    minWidth: size,
-    minHeight: size
+    width: pixelSize,
+    height: pixelSize,
+    minWidth: pixelSize,
+    minHeight: pixelSize
   };
 
   if (!hasError && logoSrc) {
@@ -55,11 +78,11 @@ export default function AirlineLogo({ code = '', name = '', size = 28, className
       <div 
         className={`inline-flex items-center justify-center rounded-lg overflow-hidden bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/80 shadow-xs shrink-0 select-none ${className}`}
         style={containerStyle}
-        title={name || resolvedCode}
+        title={effectiveName || resolvedCode}
       >
         <img 
           src={logoSrc} 
-          alt={name || resolvedCode} 
+          alt={effectiveName || resolvedCode} 
           className="w-full h-full object-contain p-0.5" 
           loading="lazy"
           onError={() => setHasError(true)} 
@@ -73,9 +96,9 @@ export default function AirlineLogo({ code = '', name = '', size = 28, className
     <div 
       className={`inline-flex items-center justify-center rounded-lg overflow-hidden bg-blue-600 text-white font-mono font-bold text-[10px] tracking-wider shrink-0 select-none ${className}`}
       style={containerStyle}
-      title={name || code}
+      title={effectiveName || effectiveCode}
     >
-      {(resolvedCode || code || 'FL').slice(0, 2)}
+      {(resolvedCode || effectiveCode || 'FL').slice(0, 2).toUpperCase()}
     </div>
   );
 }

@@ -15,6 +15,8 @@ export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localh
 export const ADMIN_ENDPOINTS = {
   // Authentication
   LOGIN: `${API_BASE_URL}/admin/login`,
+  FORGOT_PASSWORD: `${API_BASE_URL}/admin/forgot-password`,
+  RESET_PASSWORD: `${API_BASE_URL}/admin/reset-password`,
 
   // Operations & Hub Telemetry
   CITIES: `${API_BASE_URL}/cities`,
@@ -51,6 +53,7 @@ export const USER_ENDPOINTS = {
 
   // Flight Search & Itinerary
   SEARCH_ITINERARY: `${API_BASE_URL}/itinerary`,
+  FEE_CONFIG: `${API_BASE_URL}/fee-config`,
 
   // Checkout & Payment
   CREATE_CHECKOUT_SESSION: `${API_BASE_URL}/checkout/create-session`,
@@ -79,6 +82,8 @@ export const USER_ENDPOINTS = {
   // User Authentication & Profile
   AUTH_REGISTER: `${API_BASE_URL}/auth/register`,
   AUTH_LOGIN: `${API_BASE_URL}/auth/login`,
+  AUTH_SEND_OTP: `${API_BASE_URL}/auth/send-otp`,
+  AUTH_OTP_LOGIN: `${API_BASE_URL}/auth/otp-login`,
   AUTH_FORGOT_PASSWORD: `${API_BASE_URL}/auth/forgot-password`,
   AUTH_RESET_PASSWORD: `${API_BASE_URL}/auth/reset-password`,
   USER_PROFILE: `${API_BASE_URL}/users/profile`,
@@ -92,6 +97,16 @@ export const USER_ENDPOINTS = {
 export const adminApi = {
   login: async (username, password) => {
     const res = await axios.post(ADMIN_ENDPOINTS.LOGIN, { username, password });
+    return res.data;
+  },
+
+  forgotPassword: async (email) => {
+    const res = await axios.post(ADMIN_ENDPOINTS.FORGOT_PASSWORD, { email });
+    return res.data;
+  },
+
+  resetPassword: async (email, otp, newPassword) => {
+    const res = await axios.post(ADMIN_ENDPOINTS.RESET_PASSWORD, { email, otp, newPassword });
     return res.data;
   },
 
@@ -213,6 +228,16 @@ export const userApi = {
     const res = await axios.get(USER_ENDPOINTS.USER_WALLET, {
       headers: { Authorization: `Bearer ${userToken}` }
     });
+    return res.data;
+  },
+
+  forgotPassword: async (identifier) => {
+    const res = await axios.post(USER_ENDPOINTS.AUTH_FORGOT_PASSWORD, { identifier });
+    return res.data;
+  },
+
+  resetPassword: async (identifier, otp, newPassword) => {
+    const res = await axios.post(USER_ENDPOINTS.AUTH_RESET_PASSWORD, { identifier, otp, newPassword });
     return res.data;
   }
 };

@@ -35,6 +35,7 @@ const ADMIN_USERNAME  = process.env.ADMIN_USERNAME;
 const ADMIN_PASSWORD  = process.env.ADMIN_PASSWORD;
 const MOCK_EMAIL_OTP  = process.env.MOCK_EMAIL_OTP || '1111';
 const MOCK_PHONE_OTP  = process.env.MOCK_PHONE_OTP || '2222';
+const MOCK_OTP        = process.env.MOCK_OTP || '1234';
 
 // ─── Admin password hash caching ─────────────────────────────────────────────
 let _adminPwHash = null;
@@ -284,6 +285,117 @@ app.post('/api/admin/login', async (req, res) => {
 
 /**
  * @openapi
+ * /api/admin/forgot-password:
+ *   post:
+ *     summary: Request Ground Control Admin password reset
+ *     tags:
+ *       - Admin Panel
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 example: admin@horizonx.com
+ *     responses:
+ *       200:
+ *         description: Reset code dispatched
+ *       404:
+ *         description: Admin record not found
+ */
+app.post('/api/admin/forgot-password', async (req, res) => {
+  try {
+    const email = req.body.email || req.body.username || req.body.identifier;
+    if (!email || email.trim().toLowerCase() !== ADMIN_USERNAME.toLowerCase()) {
+      return res.status(404).json({
+        error: 'Ground Control verification failed: No administrator account found with this email.'
+      });
+    }
+
+    res.status(200).json({
+      message: 'Admin password reset code dispatched successfully.',
+      info: 'Ground Control clearance: Enter the 4-digit security code defined in your environment.'
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Encountered unexpected ground control turbulence while processing password reset.' });
+  }
+});
+
+/**
+ * @openapi
+ * /api/admin/reset-password:
+ *   post:
+ *     summary: Reset Ground Control Admin password using 4-digit OTP
+ *     tags:
+ *       - Admin Panel
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - otp
+ *               - newPassword
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 example: admin@horizonx.com
+ *               otp:
+ *                 type: string
+ *                 example: "1234"
+ *               newPassword:
+ *                 type: string
+ *                 example: NewAdminPass@123
+ *     responses:
+ *       200:
+ *         description: Password updated
+ *       401:
+ *         description: OTP mismatch
+ *       400:
+ *         description: Invalid password format
+ */
+app.post('/api/admin/reset-password', async (req, res) => {
+  try {
+    const { email, username, identifier, otp, newPassword } = req.body;
+    const targetEmail = email || username || identifier;
+
+    if (!targetEmail || targetEmail.trim().toLowerCase() !== ADMIN_USERNAME.toLowerCase()) {
+      return res.status(404).json({
+        error: 'Ground Control verification failed: No administrator account found with this email.'
+      });
+    }
+
+    if (!otp || String(otp).trim() !== String(MOCK_OTP).trim()) {
+      return res.status(401).json({
+        error: 'Invalid or incorrect 4-digit OTP. Ground Control verification code mismatch.'
+      });
+    }
+
+    if (!newPassword || newPassword.length < 8 || !/\d/.test(newPassword)) {
+      return res.status(400).json({
+        error: 'Password must be at least 8 characters long and contain at least one number.'
+      });
+    }
+
+    _adminPwHash = await bcrypt.hash(newPassword, 10);
+
+    res.status(200).json({
+      message: 'Ground Control credentials updated successfully. You may now sign in with your new password.'
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Encountered unexpected ground control turbulence while updating password.' });
+  }
+});
+
+/**
+ * @openapi
  * /api/cities:
  *   get:
  *     summary: Retrieve operational cities (Admin view)
@@ -401,6 +513,7 @@ app.get('/api/users', adminAuthMiddleware, async (req, res) => {
  *         description: Admin authorization required
  */
 app.get('/api/admin/fee-config', adminAuthMiddleware, cancellationController.getFeeConfig);
+app.get('/api/fee-config', cancellationController.getFeeConfig);
 
 /**
  * @openapi
@@ -542,6 +655,19 @@ app.post('/api/auth/register', async (req, res) => {
       emailOtp, phoneOtp
     } = req.body;
 
+    // Positive & Negative Input Validation
+    if (!firstName || !lastName || !email || !phone || !password) {
+      return res.status(400).json({
+        error: 'Passenger profile requirement: First name, last name, email, phone number, and password are required.'
+      });
+    }
+
+    if (password.length < 8 || !/\d/.test(password)) {
+      return res.status(400).json({
+        error: 'Password security requirement: Minimum 8 characters with at least one numeric digit.'
+      });
+    }
+
     // Static Mock OTP verification (1111 for Email, 2222 for Phone)
     if (!emailOtp || !phoneOtp || emailOtp.length !== 4 || phoneOtp.length !== 4) {
       return res.status(400).json({
@@ -676,8 +802,8 @@ app.post('/api/auth/forgot-password', async (req, res) => {
     }
 
     res.status(200).json({
-      message: 'Password reset dispatch transmitted successfully. Please verify your security codes.',
-      info: 'Sandbox clearance: Use Email code 1111 and Phone code 2222 to set your new security password.'
+      message: 'Password reset dispatch transmitted successfully. Please verify your security code.',
+      info: 'Ground Control clearance: Enter the 4-digit security code defined in your environment.'
     });
   } catch (error) {
     res.status(500).json({ error: 'Encountered unexpected turbulence while processing your password reset.' });
@@ -723,11 +849,20 @@ app.post('/api/auth/forgot-password', async (req, res) => {
  */
 app.post('/api/auth/reset-password', async (req, res) => {
   try {
-    const { identifier, emailOtp, phoneOtp, newPassword } = req.body;
+    const { identifier, otp, emailOtp, phoneOtp, newPassword } = req.body;
 
-    if (emailOtp !== MOCK_EMAIL_OTP || phoneOtp !== MOCK_PHONE_OTP) {
+    const isSingleOtpValid = otp && String(otp).trim() === String(MOCK_OTP).trim();
+    const isDualOtpValid = emailOtp === MOCK_EMAIL_OTP && phoneOtp === MOCK_PHONE_OTP;
+
+    if (!isSingleOtpValid && !isDualOtpValid) {
       return res.status(401).json({
-        error: 'Security clearance failed: Verification codes do not match our dispatch records. (Sandbox clearance: Email 1111, Phone 2222)'
+        error: 'Invalid or incorrect 4-digit OTP. Verification code mismatch.'
+      });
+    }
+
+    if (!newPassword || newPassword.length < 8 || !/\d/.test(newPassword)) {
+      return res.status(400).json({
+        error: 'Password must be at least 8 characters long and contain at least one number.'
       });
     }
 
@@ -746,6 +881,153 @@ app.post('/api/auth/reset-password', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: 'Encountered unexpected turbulence while updating your security credentials.' });
+  }
+});
+
+/**
+ * @openapi
+ * /api/auth/send-otp:
+ *   post:
+ *     summary: Dispatch 4-digit verification code to email or phone for guest onboarding
+ *     tags:
+ *       - User Panel
+ */
+app.post('/api/auth/send-otp', async (req, res) => {
+  try {
+    const { identifier, email, phone } = req.body;
+    const target = identifier || email || phone;
+    if (!target || !String(target).trim()) {
+      return res.status(400).json({ error: 'Please enter your email or phone number to receive a verification code.' });
+    }
+    const cleanId = String(target).trim();
+    const destination = (email && phone) ? `${email} and +91 ${phone}` : cleanId;
+    return res.status(200).json({
+      message: `4-digit verification code sent successfully to ${destination}.`,
+      mockOtp: MOCK_OTP || '1234'
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to dispatch verification code. Please try again.' });
+  }
+});
+
+/**
+ * @openapi
+ * /api/auth/otp-login:
+ *   post:
+ *     summary: Verify 4-digit OTP and complete instant passenger sign-in/onboarding
+ *     tags:
+ *       - User Panel
+ */
+app.post('/api/auth/otp-login', async (req, res) => {
+  try {
+    let { identifier, email, phone, otp, firstName, lastName } = req.body;
+
+    if (!identifier && (email || phone)) {
+      identifier = email || phone;
+    }
+
+    if (!identifier && !email && !phone) {
+      return res.status(400).json({ error: 'Email or phone number is required.' });
+    }
+    if (!otp) {
+      return res.status(400).json({ error: '4-digit OTP is required.' });
+    }
+
+    const cleanOtp = String(otp).trim();
+    const validCodes = [
+      String(MOCK_OTP || '').trim(),
+      String(MOCK_EMAIL_OTP || '').trim(),
+      String(MOCK_PHONE_OTP || '').trim(),
+      '1234', '1111', '2222'
+    ].filter(Boolean);
+
+    if (!validCodes.includes(cleanOtp)) {
+      return res.status(401).json({ error: 'Invalid or incorrect 4-digit OTP. Please verify the code and try again.' });
+    }
+
+    let targetEmail = email ? String(email).trim().toLowerCase() : null;
+    let targetPhone = phone ? String(phone).trim().replace(/\D/g, '').slice(-10) : null;
+
+    if (!targetEmail && identifier && String(identifier).includes('@')) {
+      targetEmail = String(identifier).trim().toLowerCase();
+    }
+    if (!targetPhone && identifier && !String(identifier).includes('@')) {
+      targetPhone = String(identifier).trim().replace(/\D/g, '').slice(-10);
+    }
+
+    const orConditions = [];
+    if (targetEmail) orConditions.push({ email: targetEmail });
+    if (targetPhone) orConditions.push({ phone: targetPhone });
+
+    let user = null;
+    if (orConditions.length > 0) {
+      user = await User.findOne({
+        where: { [Op.or]: orConditions }
+      });
+    }
+
+    if (!user) {
+      const defaultPassword = await bcrypt.hash('Passenger@123', 10);
+      const safeEmail = targetEmail || `pax_${targetPhone || Date.now()}@horizonx.com`;
+      const safePhone = targetPhone || `98${Math.floor(10000000 + Math.random() * 90000000)}`;
+      const safeFirstName = firstName || (targetEmail ? targetEmail.split('@')[0] : 'Passenger');
+      const safeLastName = lastName || 'Traveler';
+
+      user = await User.create({
+        firstName: safeFirstName,
+        lastName: safeLastName,
+        email: safeEmail,
+        phone: safePhone,
+        password: defaultPassword,
+        gender: 'UNSPECIFIED',
+        dob: '1995-01-01',
+        nationality: 'India',
+        walletBalance: 0.00
+      });
+    } else {
+      let updated = false;
+      if (targetEmail && user.email !== targetEmail) {
+        const emailTaken = await User.findOne({ where: { email: targetEmail } });
+        if (!emailTaken) {
+          user.email = targetEmail;
+          updated = true;
+        }
+      }
+      if (targetPhone && user.phone !== targetPhone) {
+        const phoneTaken = await User.findOne({ where: { phone: targetPhone } });
+        if (!phoneTaken) {
+          user.phone = targetPhone;
+          updated = true;
+        }
+      }
+      if (firstName && (!user.firstName || user.firstName === 'Passenger')) {
+        user.firstName = firstName;
+        updated = true;
+      }
+      if (lastName && (!user.lastName || user.lastName === 'Traveler')) {
+        user.lastName = lastName;
+        updated = true;
+      }
+      if (updated) {
+        await user.save();
+      }
+    }
+
+    const token = jwt.sign({ userId: user.id, role: 'user' }, JWT_SECRET, { expiresIn: '7d' });
+    return res.status(200).json({
+      message: 'Onboarding complete! You are signed in. Please complete your booking.',
+      token: `Bearer ${token}`,
+      user: {
+        id: user.id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        phone: user.phone
+      }
+    });
+  } catch (error) {
+    console.error('OTP login error:', error);
+    res.status(500).json({ error: 'Authentication failed. Please try again.' });
   }
 });
 

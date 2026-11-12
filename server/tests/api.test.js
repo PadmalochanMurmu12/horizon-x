@@ -94,6 +94,49 @@ describe('✈️ HORIZON-X FULL REST API TEST SUITE', () => {
     const testEmail = `tester_${Date.now()}@horizonx.com`;
     const testPhone = `+91${Math.floor(1000000000 + Math.random() * 9000000000)}`;
 
+    it('POST /api/auth/register should fail when mandatory fields are missing', async () => {
+      const res = await request(app)
+        .post('/api/auth/register')
+        .send({
+          firstName: 'Anil',
+          email: testEmail
+        });
+      expect(res.statusCode).toBe(400);
+      expect(res.body.error).toContain('Passenger profile requirement');
+    });
+
+    it('POST /api/auth/register should fail when password is less than 8 characters or lacks a digit', async () => {
+      const res = await request(app)
+        .post('/api/auth/register')
+        .send({
+          firstName: 'Anil',
+          lastName: 'Kapoor',
+          email: `short_${testEmail}`,
+          phone: `+91${Math.floor(1000000000 + Math.random() * 9000000000)}`,
+          password: 'pass',
+          emailOtp: '1111',
+          phoneOtp: '2222'
+        });
+      expect(res.statusCode).toBe(400);
+      expect(res.body.error).toContain('Password security requirement');
+    });
+
+    it('POST /api/auth/register should fail when email and phone OTP are identical', async () => {
+      const res = await request(app)
+        .post('/api/auth/register')
+        .send({
+          firstName: 'Anil',
+          lastName: 'Kapoor',
+          email: `same_otp_${testEmail}`,
+          phone: `+91${Math.floor(1000000000 + Math.random() * 9000000000)}`,
+          password: 'Password@123',
+          emailOtp: '1111',
+          phoneOtp: '1111'
+        });
+      expect(res.statusCode).toBe(400);
+      expect(res.body.error).toContain('distinct');
+    });
+
     it('POST /api/auth/register should fail on incorrect sandbox OTP', async () => {
       const res = await request(app)
         .post('/api/auth/register')
@@ -131,6 +174,25 @@ describe('✈️ HORIZON-X FULL REST API TEST SUITE', () => {
       expect(res.statusCode).toBe(201);
       expect(res.body).toHaveProperty('userId');
       passengerUserId = res.body.userId;
+    });
+
+    it('POST /api/auth/register should fail on duplicate email or phone (409 Conflict)', async () => {
+      const res = await request(app)
+        .post('/api/auth/register')
+        .send({
+          firstName: 'Anil',
+          lastName: 'Duplicate',
+          email: testEmail,
+          phone: testPhone,
+          password: 'Password@123',
+          gender: 'MALE',
+          dob: '1985-05-15',
+          nationality: 'Indian',
+          emailOtp: '1111',
+          phoneOtp: '2222'
+        });
+      expect(res.statusCode).toBe(409);
+      expect(res.body.error).toContain('Passenger manifest conflict');
     });
 
     it('POST /api/auth/login should block on wrong password', async () => {

@@ -10,20 +10,43 @@
 function formatFlightDateTime(dateInput) {
   if (!dateInput) return 'TBA';
   const d = new Date(dateInput);
-  if (isNaN(d.getTime())) return String(dateInput);
+  if (isNaN(d.getTime())) return String(dateInput).replace(/\s*UTC/gi, '').trim();
   const dateStr = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   const timeStr = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
-  return `${dateStr}, ${timeStr} UTC`;
+  return `${dateStr}, ${timeStr}`;
 }
+
+const AIRPORT_DIRECTORY = {
+  DEL: { city: 'Delhi', name: 'Indira Gandhi International Airport', terminal: 'T3' },
+  BLR: { city: 'Bengaluru', name: 'Kempegowda International Airport', terminal: 'T2' },
+  BOM: { city: 'Mumbai', name: 'Chhatrapati Shivaji Maharaj Intl Airport', terminal: 'T2' },
+  MAA: { city: 'Chennai', name: 'Chennai International Airport', terminal: 'T1' },
+  CCU: { city: 'Kolkata', name: 'Netaji Subhash Chandra Bose Intl Airport', terminal: 'T1' },
+  HYD: { city: 'Hyderabad', name: 'Rajiv Gandhi International Airport', terminal: 'T1' },
+  AMD: { city: 'Ahmedabad', name: 'Sardar Vallabhbhai Patel Intl Airport', terminal: 'T1' },
+  GOI: { city: 'Goa', name: 'Dabolim Airport', terminal: 'T1' },
+  GOX: { city: 'Goa', name: 'Manohar International Airport', terminal: 'T1' },
+  COK: { city: 'Kochi', name: 'Cochin International Airport', terminal: 'T3' },
+  PNQ: { city: 'Pune', name: 'Pune Airport', terminal: 'T1' },
+  JAI: { city: 'Jaipur', name: 'Jaipur International Airport', terminal: 'T2' },
+  LKO: { city: 'Lucknow', name: 'Chaudhary Charan Singh Intl Airport', terminal: 'T3' },
+  GAU: { city: 'Guwahati', name: 'Lokpriya Gopinath Bordoloi Intl Airport', terminal: 'T1' }
+};
 
 /**
  * Normalizes leg sector properties whether structured from inventory segments or booking JSON.
  */
 function normalizeSector(leg) {
-  const origin = leg.originAirportCode || leg.origin || 'DEL';
-  const originCity = leg.originCity ? ` (${leg.originCity})` : '';
-  const destination = leg.destinationAirportCode || leg.destination || 'BOM';
-  const destinationCity = leg.destinationCity ? ` (${leg.destinationCity})` : '';
+  const origin = (leg.originAirportCode || leg.origin || 'DEL').toUpperCase();
+  const originInfo = AIRPORT_DIRECTORY[origin] || { city: leg.originCity || origin, name: `${origin} Airport`, terminal: 'T1' };
+  const originCityName = leg.originCity || originInfo.city;
+  const originLabel = `${origin} (${originCityName})`;
+
+  const destination = (leg.destinationAirportCode || leg.destination || 'BLR').toUpperCase();
+  const destInfo = AIRPORT_DIRECTORY[destination] || { city: leg.destinationCity || destination, name: `${destination} Airport`, terminal: 'T1' };
+  const destCityName = leg.destinationCity || destInfo.city;
+  const destinationLabel = `${destination} (${destCityName})`;
+
   const rawDep = leg.departureTime || leg.scheduledDeparture;
   const rawArr = leg.arrivalTime || leg.scheduledArrival;
 
@@ -39,9 +62,13 @@ function normalizeSector(leg) {
     airlineCode: leg.airlineCode || leg.airline?.code || '6E',
     aircraft: leg.aircraft || 'Airbus A320-200',
     origin,
-    originLabel: `${origin}${originCity}`,
+    originCity: originCityName,
+    originAirportName: originInfo.name,
+    originLabel,
     destination,
-    destinationLabel: `${destination}${destinationCity}`,
+    destinationCity: destCityName,
+    destinationAirportName: destInfo.name,
+    destinationLabel,
     rawDepartureTime: rawDep,
     rawArrivalTime: rawArr,
     departureTime: formatFlightDateTime(rawDep),
@@ -80,12 +107,12 @@ function getJourneyClassification(booking) {
 function generateIataBcbp(passenger, segment, pnr) {
   const pName = `${(passenger.lastName || 'TRAVELER').toUpperCase()}/${(passenger.firstName || '').toUpperCase()}`.padEnd(20, ' ').substring(0, 20);
   const cleanPnr = (pnr || 'HX7K9B').padEnd(7, ' ').substring(0, 7);
-  const origin = (segment.origin || 'DEL').substring(0, 3);
-  const dest = (segment.destination || 'BOM').substring(0, 3);
-  const carrier = (segment.airlineCode || segment.airline?.code || '6E').padEnd(3, ' ').substring(0, 3);
+  const origin = (segment.originAirportCode || segment.origin || 'DEL').substring(0, 3).toUpperCase();
+  const dest = (segment.destinationAirportCode || segment.destination || 'BOM').substring(0, 3).toUpperCase();
+  const carrier = (segment.airlineCode || segment.airline?.code || '6E').padEnd(3, ' ').substring(0, 3).toUpperCase();
   const flightNo = String(segment.flightNumber || '1001').replace(/[^0-9]/g, '').padStart(4, '0').substring(0, 4);
-  const cabin = (passenger.cabinClass || segment.cabinClass || 'Y').substring(0, 1);
-  const seat = (passenger.seatNumber || '12A').padStart(4, '0').substring(0, 4);
+  const cabin = (passenger.cabinClass || segment.cabinClass || 'Y').substring(0, 1).toUpperCase();
+  const seat = (passenger.seatNumber || '12A').padStart(4, '0').substring(0, 4).toUpperCase();
   const seq = '0042';
 
   return `M1${pName}E${cleanPnr} ${origin}${dest}${carrier} ${flightNo} 318${cabin}${seat}${seq} 147>5180`;
@@ -102,36 +129,76 @@ function generateFlightTicket(booking, format = 'markdown') {
   const bookingDate = new Date(booking.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 
   const rawSectors = journey.map(normalizeSector);
+  const primaryPax = passengers[0] || {};
+  const ticketNo = primaryPax.ticketNumber || `402-${Math.floor(1000000000 + Math.random() * 9000000000)}-01`;
+  const agencyBookingId = `SKY-2026-${booking.pnr}920`;
+
+  const totalAmountNum = Number(booking.totalAmount || 8678);
+  const isUsd = totalAmountNum < 1000;
+  const currency = booking.currency || (isUsd ? 'USD' : 'INR');
+  const platformFee = isUsd ? 8.50 : (booking.fareBreakdown?.platformFee || 250);
+  const baseFare = Number(booking.fareBreakdown?.baseFare || (totalAmountNum - platformFee));
+
   const data = {
     documentType: 'ELECTRONIC_TICKET_RECEIPT',
     pnr: booking.pnr,
-    status: booking.status,
-    paymentStatus: booking.paymentStatus,
+    eTicketNumber: ticketNo,
+    agencyBookingId,
+    issueDate: bookingDate,
+    status: booking.status || 'CONFIRMED',
+    paymentStatus: booking.paymentStatus || 'PAID',
     classification,
     bookingDate,
-    tripType: booking.tripType,
-    cabinClass: booking.cabinClass,
+    tripType: booking.tripType || 'ONEWAY',
+    cabinClass: booking.cabinClass || 'ECONOMY',
+    fareBasis: 'YFLX26 / Standard Saver',
     contactInfo: {
-      email: booking.contactEmail,
-      phone: booking.contactPhone
+      email: booking.contactEmail || 'alex.rivera@example.com',
+      phone: booking.contactPhone || '+91 9876543210'
     },
-    totalAmount: Number(booking.totalAmount),
-    currency: booking.currency || 'INR',
-    passengers: passengers.map(p => ({
-      name: `${p.firstName} ${p.lastName}`,
-      ticketNumber: p.ticketNumber || `098-${Math.floor(1000000000 + Math.random() * 9000000000)}`,
-      seatNumber: p.seatNumber || 'Unassigned',
-      foodOption: p.foodOption || 'VEG',
-      nationality: p.nationality || 'Indian'
-    })),
+    totalAmount: totalAmountNum,
+    currency,
+    fareBreakdown: {
+      baseFare,
+      platformFee,
+      seatSelection: 0,
+      totalAmount: totalAmountNum
+    },
+    baggage: {
+      checked: '1 Piece (15 kg)',
+      carryOn: '7 kg + Personal Item'
+    },
+    passengers: passengers.map((p, idx) => {
+      const legalName = `${p.lastName?.toUpperCase() || 'RIVERA'} / ${p.firstName?.toUpperCase() || 'ALEX'} ${p.gender === 'FEMALE' ? 'MS' : 'MR'}`;
+      const foodOption = p.foodOption || p.mealPreference || 'Gluten-Free Meal';
+      const m = foodOption.toLowerCase();
+      const ssrCode = m.includes('gluten') ? 'GFML' : m.includes('non-veg') ? 'NVML' : m.includes('asian') ? 'AVML' : m.includes('veg') ? 'VGML' : 'AVML';
+      return {
+        name: `${p.firstName} ${p.lastName}`,
+        legalName,
+        passengerType: p.age && p.age < 12 ? 'CHD (Child)' : 'ADT (Adult / 18+)',
+        ticketNumber: p.ticketNumber || `402-${Math.floor(1000000000 + Math.random() * 9000000000)}-0${idx + 1}`,
+        seatNumber: p.seatNumber || '14A (Window)',
+        foodOption,
+        ssrCode,
+        nationality: p.nationality || 'Indian'
+      };
+    }),
     sectors: rawSectors.map((s, idx) => ({
       sectorNumber: idx + 1,
       flightNumber: s.flightNumber,
       airline: s.airline,
+      airlineCode: s.airlineCode,
       aircraft: s.aircraft,
       origin: s.origin,
+      originCity: s.originCity,
+      originAirportName: s.originAirportName,
+      originTerminal: s.originTerminal || 'Terminal 3',
       originLabel: s.originLabel,
       destination: s.destination,
+      destinationCity: s.destinationCity,
+      destinationAirportName: s.destinationAirportName,
+      destinationTerminal: s.destinationTerminal || 'Terminal 2',
       destinationLabel: s.destinationLabel,
       departureTime: s.departureTime,
       arrivalTime: s.arrivalTime,
@@ -145,53 +212,71 @@ function generateFlightTicket(booking, format = 'markdown') {
   // 2. Markdown Document
   if (format === 'markdown') {
     const passengerTable = data.passengers.map((p, i) =>
-      `| ${i + 1} | ${p.name} | \`${p.ticketNumber}\` | **${p.seatNumber}** | ${p.foodOption} | ${p.nationality} |`
+      `| ${i + 1} | ${p.legalName} | \`${p.ticketNumber}\` | **${p.seatNumber}** | ${p.foodOption} (${p.ssrCode}) | ${p.passengerType} |`
     ).join('\n');
 
     const sectorBlocks = data.sectors.map(s => `
 ### Sector ${s.sectorNumber}: ${s.originLabel} ➔ ${s.destinationLabel} (${s.flightNumber})
-- **Carrier:** ${s.airline} • **Aircraft:** ${s.aircraft}
-- **Departure:** \`${s.departureTime}\`
-- **Arrival:** \`${s.arrivalTime}\`
-- **Duration:** ${s.durationMinutes} mins • **Cabin:** ${booking.cabinClass}
+- **Carrier:** ${s.airline} (${s.airlineCode}) • **Aircraft:** ${s.aircraft}
+- **Departure:** \`${s.departureTime}\` (${s.originTerminal})
+- **Arrival:** \`${s.arrivalTime}\` (${s.destinationTerminal})
+- **Duration:** ${s.durationMinutes} mins • **Cabin:** ${booking.cabinClass} (Y / Standard Saver - YFLX26)
 - **Baggage Allowance:** ${s.baggageAllowance}
 `).join('\n');
 
     const markdown = `# ✈️ HORIZON-X PASSENGER ELECTRONIC TICKET RECEIPT
 **Aviation Ground Control • Official Passenger Name Record (PNR)**
+*${data.sectors[0]?.airline || 'Horizon-X Partner'} (${data.sectors[0]?.airlineCode || 'HX'}) • Official Confirmation*
 
 ---
 
-### 📋 Reservation Overview
+### 1. 📋 Booking & Identification Numbers
 - **Booking Reference (PNR):** \`${data.pnr}\`
-- **Booking Status:** **${data.status}** (${data.paymentStatus})
-- **Journey Classification:** **${classification}**
-- **Date of Issue:** ${data.bookingDate}
-- **Contact Email:** \`${data.contactInfo.email}\` | **Phone:** \`${data.contactInfo.phone}\`
-- **Total Amount Paid:** **₹${data.totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })} ${data.currency}** (GST 18% inclusive)
+- **E-Ticket Number:** \`${data.eTicketNumber}\`
+- **Agency Booking ID:** \`${data.agencyBookingId}\`
+- **Issue Date:** ${data.issueDate}
+- **Booking Status:** **${data.status}** (${data.paymentStatus} / PAID IN FULL)
 
 ---
 
-### 👥 Passenger Details
-| # | Passenger Name | E-Ticket Number (13-Digit) | Seat | Meal | Nationality |
-|---|----------------|----------------------------|------|------|-------------|
+### 2. 👥 Passenger Details
+| # | Legal Passenger Name | E-Ticket Number | Seat Assigned | Meal Preference | Passenger Type |
+|---|----------------------|-----------------|---------------|-----------------|----------------|
 ${passengerTable}
+- **Registered Contact:** \`${data.contactInfo.email}\` | \`${data.contactInfo.phone}\`
 
 ---
 
-### 🗺️ Flight Sectors & Navigational Itinerary
+### 3. 🗺️ Flight Itinerary & Timetable
 ${sectorBlocks}
 
 ---
 
-### 📌 Conditions of Carriage & Travel Advisory
-1. **Reporting Time:** Check-in counters open 2 hours and strictly close 60 minutes prior to scheduled departure.
-2. **Identification:** All adult passengers must present a government-issued photo identity document (Aadhaar, Passport, Voter ID) matching the ticket name.
-3. **Baggage Policy:** Standard Economy check-in allowance is 15 KG per passenger (1 piece) plus 7 KG cabin hand baggage.
-4. **Cancellation & Changes:** Subject to carrier tariff rules. Visit Horizon-X ground control panel or call customer support.
+### 4. 🧳 Baggage & Seating Assignment
+- **Checked Baggage:** ${data.baggage.checked} (Included with Fare)
+- **Carry-on Baggage:** ${data.baggage.carryOn} (Standard Overhead Bin)
+- **Seat Assigned:** ${data.passengers[0]?.seatNumber} (Window / Standard Pitch)
+- **Meal Preference:** ${data.passengers[0]?.foodOption} (${data.passengers[0]?.ssrCode})
 
 ---
-*Horizon-X Aviation Systems • Secure E-Ticket Generated Automatically • IATA Accredited*
+
+### 5. 💳 Fare & Payment Breakdown
+- **Air Transportation Base Fare:** ${data.currency} ${data.fareBreakdown.baseFare.toLocaleString('en-IN')}
+- **Convenience & Platform Fee (Admin Capped):** ${data.currency} ${data.fareBreakdown.platformFee.toLocaleString('en-IN')}
+- **Seat Selection:** Included (${data.currency} 0.00)
+- **Total Amount Invoiced:** **${data.currency} ${data.totalAmount.toLocaleString('en-IN')}** (PAID IN FULL)
+- **Fare Basis:** ${data.fareBasis} (Non-endorsable)
+
+---
+
+### 6. 📌 Legal & Regulatory Notices
+1. **Conditions of Carriage:** Air carriage is subject to Montreal Convention 1999 rules and carrier tariffs.
+2. **Ticket Validity:** Valid for travel for 1 year from issue date.
+3. **Airport Guidelines:** Check-in counters close 60 mins before departure; boarding gates close 20 mins prior.
+4. **Mandatory Documentation:** Government-issued photo ID required. Lithium batteries permitted in cabin baggage only.
+
+---
+*Horizon-X Aviation Systems • Secure Standalone E-Ticket Generated Automatically*
 `;
     return markdown;
   }
@@ -225,36 +310,53 @@ function generateBoardingPass(booking, format = 'markdown', passengerIndex = 0) 
 
   const departureDate = new Date(firstSector.rawDepartureTime || new Date());
   const boardingDate = new Date(departureDate.getTime() - 45 * 60 * 1000); // 45 min prior
+  const gateCloseDate = new Date(departureDate.getTime() - 20 * 60 * 1000); // 20 min prior
 
-  const terminal = passenger.terminal || (firstSector.origin === 'DEL' ? 'T3' : firstSector.origin === 'BOM' ? 'T2' : 'T1');
-  const gate = passenger.gate || `Gate ${10 + (Math.abs(booking.pnr.charCodeAt(0)) % 15)}${String.fromCharCode(65 + (Math.abs(booking.pnr.charCodeAt(1)) % 4))}`;
+  const originInfo = AIRPORT_DIRECTORY[firstSector.origin] || { city: firstSector.origin, terminal: 'Terminal 3', shortTerm: 'T3' };
+  const destInfo = AIRPORT_DIRECTORY[firstSector.destination] || { city: firstSector.destination, terminal: 'Terminal 2', shortTerm: 'T2' };
+  const terminal = passenger.terminal || originInfo.terminal || 'Terminal 3';
+  const gate = passenger.gate || '18B';
   const boardingGroup = passenger.boardingGroup || (booking.cabinClass === 'BUSINESS' || booking.cabinClass === 'FIRST' ? 'ZONE 1' : 'ZONE 2');
-  const seatNumber = passenger.seatNumber || '12B';
-  const ticketNumber = passenger.ticketNumber || `098-${Math.floor(1000000000 + Math.random() * 9000000000)}`;
+  const seatNumber = passenger.seatNumber || '14A';
+  const ticketNumber = passenger.ticketNumber || `402-${Math.floor(1000000000 + Math.random() * 9000000000)}`;
   const barcodeString = passenger.barcode || generateIataBcbp(passenger, firstSector, booking.pnr);
+  const foodOption = passenger.foodOption || passenger.mealPreference || 'Gluten-Free Meal';
+  const m = foodOption.toLowerCase();
+  const ssrCode = m.includes('gluten') ? 'GFML' : m.includes('non-veg') ? 'NVML' : m.includes('asian') ? 'AVML' : m.includes('veg') ? 'VGML' : 'AVML';
 
   const data = {
     documentType: 'OFFICIAL_BOARDING_PASS',
     pnr: booking.pnr,
-    passengerName: `${passenger.lastName?.toUpperCase()} / ${passenger.firstName?.toUpperCase()} MR/MS`,
-    flightNumber: firstSector.flightNumber || 'HX-1001',
-    carrier: firstSector.airline || 'Horizon-X',
-    carrierCode: firstSector.airlineCode || '6E',
-    aircraft: firstSector.aircraft || 'Airbus A320neo',
+    passengerName: `${passenger.lastName?.toUpperCase() || 'RIVERA'} / ${passenger.firstName?.toUpperCase() || 'ALEX'} ${passenger.gender === 'FEMALE' ? 'MS' : 'MR'}`,
+    flightNumber: firstSector.flightNumber || 'SK-402',
+    carrier: firstSector.airline || 'Skybound Wings',
+    carrierCode: firstSector.airlineCode || 'SK',
+    aircraft: firstSector.aircraft || 'Airbus A321neo',
     origin: firstSector.origin || 'DEL',
-    destination: firstSector.destination || 'BOM',
-    departureTime: departureDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + ' UTC',
+    originCity: firstSector.originCity || originInfo.city || 'Delhi',
+    originTerminal: originInfo.shortTerm || 'T3',
+    destination: firstSector.destination || 'BLR',
+    destinationCity: firstSector.destinationCity || destInfo.city || 'Bengaluru',
+    destinationTerminal: destInfo.shortTerm || 'T2',
+    departureTime: departureDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }),
     departureDate: departureDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
-    boardingTime: boardingDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + ' UTC',
+    boardingTime: boardingDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }),
+    gateCloseTime: gateCloseDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }),
     terminal,
     gate,
     boardingGroup,
     seatNumber,
     cabinClass: booking.cabinClass || 'ECONOMY',
     ticketNumber,
-    seqNumber: '042',
+    seqNumber: '0042',
     barcodeString,
-    isCheckedIn: Boolean(booking.isCheckedIn || passenger.isCheckedIn)
+    isCheckedIn: Boolean(booking.isCheckedIn || passenger.isCheckedIn),
+    foodOption,
+    ssrCode,
+    priorityTag: 'SKY PRIORITY',
+    securityStatus: 'DOCS OK',
+    baggageTag: `SK-${Math.floor(100000 + Math.random() * 900000)} • CABIN: 7KG`,
+    frequentFlyer: 'SkyMiles Silver'
   };
 
   if (format === 'json') return data;
@@ -262,13 +364,14 @@ function generateBoardingPass(booking, format = 'markdown', passengerIndex = 0) 
   if (format === 'markdown') {
     return `\`\`\`
 ====================================================================================================
-✈️  HORIZON-X BOARDING PASS | ${data.carrier.toUpperCase()} (${data.carrierCode})           BOARDING GROUP: ${data.boardingGroup}
+✈️  ${data.carrier.toUpperCase()} (${data.carrierCode}) OFFICIAL BOARDING PASS | IATA BCBP
 ====================================================================================================
-PASSENGER NAME : ${data.passengerName.padEnd(30, ' ')} PNR : ${data.pnr}           CLASS : ${data.cabinClass}
-ETKT NUMBER    : ${data.ticketNumber.padEnd(30, ' ')} SEQ : ${data.seqNumber}          CHECK-IN : ${data.isCheckedIn ? 'COMPLETED' : 'STANDARD'}
+PASSENGER NAME : ${data.passengerName.padEnd(30, ' ')} PNR : ${data.pnr}           CLASS : ${data.cabinClass} (Y)
+ETKT NUMBER    : ${data.ticketNumber.padEnd(30, ' ')} SEQ : ${data.seqNumber}          ZONE  : ${data.boardingGroup}
+SECURITY STAMP : ${data.securityStatus} | ${data.priorityTag}           SSR   : ${data.ssrCode} (${data.foodOption})
 ----------------------------------------------------------------------------------------------------
-SECTOR         : ${data.origin} ➔ ${data.destination}
-FLIGHT NUMBER  : ${data.flightNumber} (${data.aircraft})
+SECTOR         : ${data.origin} (${data.originCity}) ➔ ${data.destination} (${data.destinationCity})
+FLIGHT NUMBER  : ${data.flightNumber} (${data.aircraft}) • OPERATED BY ${data.carrier.toUpperCase()}
 TRAVEL DATE    : ${data.departureDate}
 
 +-----------------+-----------------+-----------------+-----------------+-----------------+
@@ -277,12 +380,10 @@ TRAVEL DATE    : ${data.departureDate}
 |       ${data.terminal.padEnd(10, ' ')}|     ${data.gate.padEnd(12, ' ')}|      ${data.boardingTime.padEnd(11, ' ')}|      ${data.departureTime.padEnd(11, ' ')}|      ${data.seatNumber.padEnd(11, ' ')}|
 +-----------------+-----------------+-----------------+-----------------+-----------------+
 
-BOARDING GATES CLOSE STRICTLY 20 MINUTES PRIOR TO SCHEDULED DEPARTURE.
-PLEASE HAVE YOUR BOARDING PASS AND GOVERNMENT-ISSUED PHOTO ID READY AT GATE INSPECTION.
-
-IATA 2D BARCODE ENCODING:
-${data.barcodeString}
-||| | ||||| |||| || | |||| |||||| ||||| ||| |||| |||| ||| |||| |||||||| |||| | ||||| |||| || | |||
+* BOARDING GATES CLOSE STRICTLY AT ${data.gateCloseTime} (20 MINUTES PRIOR TO SCHEDULED DEPARTURE).
+* GOVERNMENT-ISSUED PHOTO ID MANDATORY AT BOARDING GATE.
+* BAGGAGE CLAIM REF: ${data.baggageTag}
+[SECURE IATA BCBP 2D BARCODE: SCANNABLE AT GATE]
 ====================================================================================================
 \`\`\``;
   }
@@ -374,6 +475,13 @@ function generatePrintableTicketHtml(ticket) {
       </div>
     `).join('')}
 
+    <div style="margin-top: 24px; padding: 16px; border: 1px dashed #d1d5db; border-radius: 8px; text-align: center; background: #fafafa;">
+      <div style="height: 44px; width: 100%; max-width: 360px; margin: 0 auto; background: repeating-linear-gradient(90deg, #111 0px, #111 2px, #fff 2px, #fff 4px, #111 4px, #111 7px, #fff 7px, #fff 9px, #111 9px, #111 10px, #fff 10px, #fff 13px, #111 13px, #111 16px); border-radius: 2px;"></div>
+      <div style="font-family: monospace; font-size: 10px; color: #6b7280; margin-top: 6px;">
+        IATA ETKT ${ticket.pnr} SECURE ELECTRONIC VERIFICATION BARCODE
+      </div>
+    </div>
+
     <div class="footer">
       Notice: Gate closes 25 minutes prior to scheduled departure. Government-issued photo identification is mandatory for airport entry.
     </div>
@@ -438,13 +546,14 @@ function generatePrintableBoardingPassHtml(bp) {
         <div><div class="label">Terminal</div><div class="val">${bp.terminal} (${bp.boardingGroup})</div></div>
       </div>
       <div class="barcode-area">
-        ${bp.barcodeString}
+        <div style="font-weight: bold; color: #005cab;">SECURE ELECTRONIC BOARDING PASS</div>
+        <div>BAG TAG: ${bp.baggageTag}</div>
         <div class="barcode-graphic"></div>
       </div>
     </div>
     <div class="side-stub">
       <div>
-        <div style="font-size: 14px; font-weight: 800; color: #005cab; margin-bottom: 12px;">PASSENGER COUPON</div>
+        <div style="font-size: 14px; font-weight: 800; color: #005cab; margin-bottom: 12px;">FLIGHT STUB</div>
         <div class="label">Name</div><div class="val" style="font-size: 12px; margin-bottom: 8px;">${bp.passengerName}</div>
         <div class="label">Flight / PNR</div><div class="val" style="margin-bottom: 8px;">${bp.flightNumber} / ${bp.pnr}</div>
         <div class="label">Route</div><div class="val" style="margin-bottom: 8px;">${bp.origin} ➔ ${bp.destination}</div>

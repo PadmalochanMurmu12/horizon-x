@@ -57,9 +57,13 @@ function formatItinerary(legs, paxCounts) {
 
   const totalDuration = calculateDurationMinutes(departure, arrival);
   const fares = legs.map(leg => leg?.fares?.[0] || leg?.FlightFares?.[0] || {});
+  const flightNumJoined = legs.map(l => l.flightNumber).join('-');
+  const depTimestamp = new Date(departure).getTime();
+  const uniqueId = `${flightNumJoined}_${depTimestamp}_${legs[0]?.id?.slice(0, 8) || 'seg'}`;
 
   return {
-    id: legs.map(l => l.flightNumber).join('-'),
+    id: uniqueId,
+    flightNumber: flightNumJoined,
     isDirect,
     totalDuration,
     departureTime: departure,

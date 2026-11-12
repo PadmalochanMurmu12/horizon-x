@@ -1,6 +1,12 @@
 import React, { useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import LandingPage from './pages/LandingPage';
+import FlightItineraryPage from './pages/FlightItineraryPage';
+import CheckoutPage from './pages/CheckoutPage';
+import BookingSuccessPage from './pages/BookingSuccessPage';
+import SignUpPage from './pages/SignUpPage';
+import SignInPage from './pages/SignInPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import MyBookingsPage from './pages/MyBookingsPage';
 import AdminLogin from './pages/admin/AdminLogin';
 import AdminDashboard from './pages/admin/AdminDashboard';
@@ -38,8 +44,25 @@ function App() {
     <ThemeProvider>
       <BrowserRouter>
         <Routes>
-          {/* Public Flight Search Engine */}
+          {/* Public Flight Search Engine & Itinerary */}
           <Route path="/" element={<LandingPage onSearch={handleFlightSearch} />} />
+          <Route path="/flights" element={<FlightItineraryPage />} />
+          <Route path="/itinerary" element={<FlightItineraryPage />} />
+          <Route path="/search" element={<FlightItineraryPage />} />
+
+          {/* Passenger Details, Booking & Checkout Session */}
+          <Route path="/checkout" element={<CheckoutPage />} />
+          <Route path="/booking/checkout" element={<CheckoutPage />} />
+          <Route path="/booking/cancelled" element={<Navigate to="/checkout?cancelled=true" replace />} />
+          <Route path="/booking/success" element={<BookingSuccessPage />} />
+          <Route path="/booking/confirmation" element={<BookingSuccessPage />} />
+
+          {/* User Fast Passwordless Onboarding & Sign In (Cleartrip model) */}
+          <Route path="/signup" element={<Navigate to="/signin" replace />} />
+          <Route path="/register" element={<Navigate to="/signin" replace />} />
+          <Route path="/signin" element={<SignInPage />} />
+          <Route path="/login" element={<SignInPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage isAdmin={false} />} />
           
           {/* My Bookings & Web Check-in */}
           <Route path="/bookings" element={<MyBookingsPage />} />
@@ -49,6 +72,10 @@ function App() {
           <Route 
             path="/admin/login" 
             element={<AdminLogin token={token} setToken={updateToken} />} 
+          />
+          <Route 
+            path="/admin/forgot-password" 
+            element={<ForgotPasswordPage isAdmin={true} />} 
           />
           
           <Route 
