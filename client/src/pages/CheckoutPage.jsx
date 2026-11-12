@@ -20,11 +20,19 @@ import {
   setAdminFeeConfig,
   setCheckoutLoading,
   setCheckoutError,
-  setBookingResult
+  setBookingResult,
+  setPaymentUrls,
+  setPaymentSuccess,
+  setPaymentDeclined,
+  setSuccessModalOpen,
+  setDeclinedModalOpen,
+  closePaymentModals
 } from '../store/bookingSlice';
 import { useTheme } from '../context/ThemeContext';
 import ThemeToggle from '../components/ThemeToggle';
 import AirlineLogo from '../components/AirlineLogo';
+import ConfirmedBookingModal from '../components/ConfirmedBookingModal';
+import DeclinedPaymentModal from '../components/DeclinedPaymentModal';
 import { USER_ENDPOINTS } from '../services/api';
 
 const COUNTRY_CODES = [
@@ -163,6 +171,88 @@ export default function CheckoutPage() {
       }
     }
   }, [selectedFlight, navigate]);
+
+  // Synchronize Stripe Payment status and URLs into Redux
+  useEffect(() => {
+    const isDeclined = searchParams.get('cancelled') === 'true' || searchParams.get('declined') === 'true';
+    const isSuccess = searchParams.get('success') === 'true';
+    const pnrParam = searchParams.get('pnr');
+    const sessionIdParam = searchParams.get('session_id');
+
+    // Check if returning from Stripe via back navigation or cancel
+    const wasStripePending = sessionStorage.getItem('hx_stripe_pending') === 'true';
+
+    if (isDeclined || wasStripePending) {
+      sessionStorage.removeItem('hx_stripe_pending');
+      // Clean query parameters from URL so that page reload does not re-open the Declined Modal
+      if (searchParams.has('cancelled') || searchParams.has('declined')) {
+        const cleanParams = new URLSearchParams(searchParams);
+        cleanParams.delete('cancelled');
+        cleanParams.delete('declined');
+        const cleanQuery = cleanParams.toString();
+        const cleanUrl = window.location.pathname + (cleanQuery ? `?${cleanQuery}` : '');
+        window.history.replaceState({}, '', cleanUrl);
+      }
+      dispatch(setPaymentDeclined({
+        cancelUrl: window.location.href,
+        errorMessage: 'Unfortunately, your payment could not be processed. Please check your payment details or try another payment method to complete your booking.'
+      }));
+    } else if (isSuccess) {
+      sessionStorage.removeItem('hx_stripe_pending');
+      // Clean success query parameter so reload does not re-trigger
+      if (searchParams.has('success')) {
+        const cleanParams = new URLSearchParams(searchParams);
+        cleanParams.delete('success');
+        const cleanQuery = cleanParams.toString();
+        const cleanUrl = window.location.pathname + (cleanQuery ? `?${cleanQuery}` : '');
+        window.history.replaceState({}, '', cleanUrl);
+      }
+      dispatch(setPaymentSuccess({
+        successUrl: window.location.href,
+        pnr: pnrParam,
+        sessionId: sessionIdParam
+      }));
+    }
+  }, [searchParams, dispatch]);
+
+  // Handle bfcache pageshow (e.g. returning from Stripe via browser back button without reload)
+  useEffect(() => {
+    const handlePageShow = (event) => {
+      if (sessionStorage.getItem('hx_stripe_pending') === 'true') {
+        sessionStorage.removeItem('hx_stripe_pending');
+        dispatch(setPaymentDeclined({
+          cancelUrl: window.location.href,
+          errorMessage: 'Unfortunately, your payment could not be processed. Please check your payment details or try another payment method to complete your booking.'
+        }));
+      }
+    };
+
+    window.addEventListener('pageshow', handlePageShow);
+    return () => {
+      window.removeEventListener('pageshow', handlePageShow);
+    };
+  }, [dispatch]);
+
+  // Intercept Browser Back Button on Checkout Page & display Declined Payment Modal
+  useEffect(() => {
+    // Push an initial state into browser history stack to trap the back button
+    window.history.pushState({ isCheckoutBackGuard: true }, '', window.location.href);
+
+    const handlePopState = (event) => {
+      // Display the decline modal on clicking the browser back button
+      dispatch(setPaymentDeclined({
+        cancelUrl: window.location.href,
+        errorMessage: 'Unfortunately, your payment could not be processed. Please check your payment details or try another payment method to complete your booking.'
+      }));
+      // Push state again so subsequent back presses also prompt/display modal cleanly
+      window.history.pushState({ isCheckoutBackGuard: true }, '', window.location.href);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [dispatch]);
 
   // Derived Flight Details
   const firstSegment = selectedFlight?.segments?.[0] || {};
@@ -402,7 +492,8 @@ export default function CheckoutPage() {
         age: Number(p.age),
         nationality: p.nationality || 'India',
         seatNo: p.seatNo && !p.seatNo.startsWith('AUTO') ? p.seatNo : '14A',
-        foodOption: p.mealPreference?.toLowerCase().includes('non-veg') ? 'NON_VEG' : 'VEG'
+        mealPreference: p.mealPreference || 'Standard Non-Veg',
+        foodOption: p.mealPreference || 'Standard Non-Veg'
       }));
 
       const fullPhone = `${contactInfo.countryCode}${contactInfo.phone.trim().replace(/[\s-]/g, '')}`;
@@ -439,11 +530,18 @@ export default function CheckoutPage() {
         throw new Error(data.error || data.message || 'Unable to initialize checkout session.');
       }
 
-      // Record result in Redux
+      // Record result & URLs in Redux
       dispatch(setBookingResult(data.data));
+      if (data.data?.successUrl || data.data?.cancelUrl) {
+        dispatch(setPaymentUrls({
+          successUrl: data.data.successUrl,
+          cancelUrl: data.data.cancelUrl
+        }));
+      }
 
       // Open Stripe's checkout interface directly
       if (data.data?.checkoutUrl) {
+        sessionStorage.setItem('hx_stripe_pending', 'true');
         window.location.href = data.data.checkoutUrl;
       } else {
         throw new Error('Checkout session generated without a valid redirect URL.');
@@ -451,6 +549,9 @@ export default function CheckoutPage() {
     } catch (err) {
       console.error('Checkout creation error:', err);
       dispatch(setCheckoutError(err.message || 'Payment clearance failed. Please try again.'));
+      dispatch(setPaymentDeclined({
+        errorMessage: err.message || 'Payment clearance failed. Please try again.'
+      }));
     }
   };
 
@@ -700,16 +801,16 @@ export default function CheckoutPage() {
                 </div>
 
                 {/* Duration & Route Path (No Overlapping, Clear Vertical Spacing) */}
-                <div className="flex flex-col items-center justify-center text-center px-2">
+                <div className="flex flex-col items-center justify-center text-center px-4 min-w-[140px]">
                   <span className="text-xs text-slate-500 dark:text-slate-400 font-medium mb-1">
                     {durationFormatted}
                   </span>
-                  <div className="w-full flex items-center relative my-2 max-w-[140px]">
-                    <div className="h-0.5 w-full bg-slate-300 dark:bg-slate-700"></div>
-                    <div className={`absolute left-1/2 -translate-x-1/2 -translate-y-1/2 top-1/2 px-1.5 text-[#005cab] dark:text-blue-400 flex items-center justify-center ${
+                  <div className="w-full flex items-center justify-center relative my-1 h-6 max-w-[140px]">
+                    <div className="h-[2px] w-full bg-slate-300 dark:bg-slate-700"></div>
+                    <div className={`absolute px-2 text-[#005cab] dark:text-blue-400 flex items-center justify-center ${
                       isDark ? 'bg-slate-900' : 'bg-white'
                     }`}>
-                      <span className="material-symbols-outlined text-[16px] rotate-90">flight</span>
+                      <span className="material-symbols-outlined text-[16px] rotate-90 leading-none">flight</span>
                     </div>
                   </div>
                   <span className="text-xs text-emerald-600 dark:text-emerald-400 font-bold mt-1">
@@ -1828,10 +1929,10 @@ export default function CheckoutPage() {
                 </div>
               </div>
 
-              {/* Passenger Manifest Overview */}
+              {/* Passenger Details Overview */}
               <div className="border border-slate-200 dark:border-slate-800 rounded-xl p-4 space-y-2">
                 <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  Passenger Manifest ({passengers.length} Traveler{passengers.length > 1 ? 's' : ''})
+                  Passenger Details
                 </h4>
                 <div className="space-y-3 pt-1">
                   {passengers.map((p, idx) => (
@@ -1868,7 +1969,7 @@ export default function CheckoutPage() {
               {/* Contact Info Summary */}
               <div className="border border-slate-200 dark:border-slate-800 rounded-xl p-4 space-y-2">
                 <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  Booking Confirmation Sent To
+                  Booking Confirmation will be sent to
                 </h4>
                 <div className="grid grid-cols-2 gap-2 text-xs pt-1">
                   <div>
@@ -2184,6 +2285,26 @@ export default function CheckoutPage() {
           </div>
         </div>
       )}
+
+      {/* ==============================================================
+         4C. CONFIRMED FLIGHT TICKET BOOKING MODAL (Requirement 1)
+         ============================================================== */}
+      <ConfirmedBookingModal
+        isOpen={ui.isSuccessModalOpen}
+        onClose={() => dispatch(setSuccessModalOpen(false))}
+        pnrOverride={searchParams.get('pnr')}
+      />
+
+      {/* ==============================================================
+         4D. DECLINED PAYMENT MODAL (Requirement 2)
+         ============================================================== */}
+      <DeclinedPaymentModal
+        isOpen={ui.isDeclinedModalOpen}
+        onClose={() => dispatch(setDeclinedModalOpen(false))}
+        onReviewBooking={() => dispatch(setReviewModalOpen(true))}
+        onTryAgain={executePaymentCheckout}
+        isRetrying={ui.isSubmitting}
+      />
 
       {/* ==============================================================
          5. FOOTER (High Contrast in Light Mode & Dark Mode)

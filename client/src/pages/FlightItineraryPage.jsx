@@ -531,8 +531,11 @@ export default function FlightItineraryPage() {
             const baseFare = Number(flight.pricing?.baseFare) || Math.round(totalFare * 0.85);
             const tax = Number(flight.pricing?.tax) || (totalFare - baseFare);
 
+            const cleanFlightNo = (firstSeg?.flightNumber || flight.flightNumber || `HX-${idx + 101}`).split('_')[0];
+
             return {
               id: flight.id || `HX-${idx + 101}`,
+              flightNumber: cleanFlightNo,
               isDirect,
               totalDuration: durMins,
               durationFormatted,
@@ -546,7 +549,7 @@ export default function FlightItineraryPage() {
               ecoBadge: idx === 0 ? 'Eco-saver • Carbon Offset Included' : (idx === 1 ? 'Seats left: 3 at this fare' : 'Fast-track Security Clearance'),
               segments: flight.segments.map((seg, sIdx) => ({
                 flightId: seg.flightId || `SEG-${sIdx}`,
-                flightNumber: seg.flightNumber || `HX-${200 + sIdx}`,
+                flightNumber: (seg.flightNumber || `HX-${200 + sIdx}`).split('_')[0],
                 airline: {
                   code: seg.airline?.code || 'IX',
                   name: seg.airline?.name || 'Horizon-X Fleet'
@@ -1994,27 +1997,27 @@ export default function FlightItineraryPage() {
                     </div>
 
                     {/* Main Info Row (Airline, Schedule Line, Pricing & Action) */}
-                    <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-4 lg:gap-6 items-center">
                       
                       {/* Airline Details & Aircraft IATA code */}
-                      <div className="md:col-span-3 flex items-center gap-3 min-w-0">
+                      <div className="md:col-span-4 lg:col-span-3 flex items-center gap-3 min-w-0 overflow-hidden">
                         <AirlineLogo 
                           code={firstSeg?.airline?.code || 'HX'} 
                           name={firstSeg?.airline?.name} 
                           size={48} 
                         />
-                        <div className="min-w-0 flex-1">
-                          <h4 className="text-base font-bold text-[#1b1c1c] dark:text-white leading-tight truncate">
+                        <div className="min-w-0 flex-1 overflow-hidden">
+                          <h4 className="text-base font-bold text-[#1b1c1c] dark:text-white leading-tight truncate whitespace-nowrap">
                             {firstSeg?.airline?.name || 'Horizon-X Wings'}
                           </h4>
-                          <p className="text-xs text-[#566476] dark:text-slate-400 mt-0.5 truncate">
-                            {flight.flightNumber || firstSeg?.flightNumber || 'HX-101'} • {firstSeg?.aircraft}
+                          <p className="text-xs text-[#566476] dark:text-slate-400 mt-0.5 truncate whitespace-nowrap">
+                            {(firstSeg?.flightNumber || flight.flightNumber || 'HX-101').split('_')[0]} • {firstSeg?.aircraft}
                           </p>
                         </div>
                       </div>
 
                       {/* Flight Times & Visual Route Indicator */}
-                      <div className="md:col-span-6 grid grid-cols-7 items-center text-center">
+                      <div className="md:col-span-5 lg:col-span-6 grid grid-cols-7 items-center text-center">
                         
                         {/* Origin Time & Code */}
                         <div className="col-span-2 text-left">
@@ -2074,7 +2077,7 @@ export default function FlightItineraryPage() {
                       </div>
 
                       {/* Pricing & Selection CTA */}
-                      <div className="md:col-span-3 md:border-l md:border-[#E6E6E6] dark:md:border-slate-800 md:pl-6 flex flex-col items-end justify-center">
+                      <div className="md:col-span-3 lg:col-span-3 md:border-l md:border-[#E6E6E6] dark:md:border-slate-800 md:pl-6 flex flex-col items-end justify-center">
                         <span className="text-[11px] text-[#566476] dark:text-slate-400">
                           Per traveller
                         </span>

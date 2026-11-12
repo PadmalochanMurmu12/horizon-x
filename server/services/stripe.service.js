@@ -55,14 +55,16 @@ async function createStripeSession({ booking, passengers, legs, clientBaseUrl, p
         price_data: {
           currency: (booking.currency || 'INR').toLowerCase(),
           product_data: {
-            name: 'Convenience & Platform Fee',
-            description: 'Ground Control booking clearance and security infrastructure fee'
+            name: 'Convenience & Platform Fee'
           },
           unit_amount: Math.round(Number(platformFee) * 100),
         },
         quantity: 1,
       });
     }
+
+    const successUrl = `${originUrl}/booking/success?pnr=${booking.pnr}&session_id={CHECKOUT_SESSION_ID}`;
+    const cancelUrl = `${originUrl}/checkout?cancelled=true&pnr=${booking.pnr}`;
 
     const session = await stripeClient.checkout.sessions.create({
       line_items,
@@ -76,27 +78,32 @@ async function createStripeSession({ booking, passengers, legs, clientBaseUrl, p
         cabinClass: booking.cabinClass,
         passengerCount: String(passengers.length)
       },
-      success_url: `${originUrl}/booking/success?pnr=${booking.pnr}&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${originUrl}/checkout?cancelled=true&pnr=${booking.pnr}`,
+      success_url: successUrl,
+      cancel_url: cancelUrl,
     });
 
     return {
       paymentGateway: 'STRIPE_TEST_SANDBOX',
       isOfflineSimulation: false,
       sessionId: session.id,
-      checkoutUrl: session.url
+      checkoutUrl: session.url,
+      successUrl: `${originUrl}/booking/success?pnr=${booking.pnr}&session_id=${session.id}`,
+      cancelUrl
     };
   }
 
   // 2. Offline Simulation Fallback (only used when STRIPE_SECRET_KEY is completely missing from .env)
   const mockSessionId = `mock_cs_${Date.now()}_${booking.pnr}`;
   const mockCheckoutUrl = `${originUrl}/booking/success?pnr=${booking.pnr}&session_id=${mockSessionId}&mode=mock_sandbox`;
+  const fallbackCancelUrl = `${originUrl}/checkout?cancelled=true&pnr=${booking.pnr}`;
 
   return {
     paymentGateway: 'OFFLINE_LOCAL_SIMULATION',
     isOfflineSimulation: true,
     sessionId: mockSessionId,
     checkoutUrl: mockCheckoutUrl,
+    successUrl: mockCheckoutUrl,
+    cancelUrl: fallbackCancelUrl,
     notice: 'Stripe Secret Key is pending in .env. Operating in Offline Local Simulation Mode.'
   };
 }

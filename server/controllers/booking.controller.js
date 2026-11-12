@@ -49,7 +49,13 @@ async function getMyBookings(req, res) {
       // so the user can easily view the cards immediately in My Bookings!
     }
 
-    const whereClause = whereConditions.length > 0 ? { [Op.or]: whereConditions } : {};
+    const whereClause = {
+      status: { [Op.ne]: 'PENDING_PAYMENT' },
+      paymentStatus: { [Op.ne]: 'UNPAID' }
+    };
+    if (whereConditions.length > 0) {
+      whereClause[Op.and] = [{ [Op.or]: whereConditions }];
+    }
 
     const bookings = await Booking.findAll({
       where: whereClause,
@@ -65,7 +71,7 @@ async function getMyBookings(req, res) {
       const classification = getJourneyClassification(b);
 
       const canViewTicket = true; // Permitted for Past, Current, Future, and Completed journeys
-      const canViewBoardingPass = (classification === 'CURRENT' || classification === 'FUTURE') && b.status === 'CONFIRMED';
+      const canViewBoardingPass = (classification === 'CURRENT' || classification === 'FUTURE') && b.status === 'CONFIRMED' && Boolean(b.isCheckedIn);
 
       const origin = firstSector.originAirportCode || firstSector.origin || 'DEL';
       const destination = lastSector.destinationAirportCode || lastSector.destination || 'BOM';

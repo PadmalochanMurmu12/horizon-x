@@ -1,12 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
+import { useDispatch } from 'react-redux';
 import { useTheme } from '../context/ThemeContext';
 import ThemeToggle from '../components/ThemeToggle';
+import ConfirmedBookingModal from '../components/ConfirmedBookingModal';
+import { setPaymentSuccess } from '../store/bookingSlice';
 import { USER_ENDPOINTS } from '../services/api';
 
 export default function BookingSuccessPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const dispatch = useDispatch();
   const { isDark } = useTheme();
 
   const pnr = searchParams.get('pnr');
@@ -16,8 +20,10 @@ export default function BookingSuccessPage() {
   const [booking, setBooking] = useState(null);
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(true);
 
   useEffect(() => {
+    sessionStorage.removeItem('hx_stripe_pending');
     if (!pnr) {
       setError('No PNR specified. Please verify your reservation reference.');
       setLoading(false);
@@ -65,6 +71,12 @@ export default function BookingSuccessPage() {
         });
       } finally {
         setLoading(false);
+        // Synchronize confirmed booking & success URL into Redux (Requirement 1)
+        dispatch(setPaymentSuccess({
+          successUrl: window.location.href,
+          pnr,
+          sessionId
+        }));
       }
     };
 
@@ -258,6 +270,13 @@ export default function BookingSuccessPage() {
           </div>
         )}
       </main>
+
+      {/* Confirmed Flight Ticket Booking Modal (Requirement 1) */}
+      <ConfirmedBookingModal
+        isOpen={showSuccessModal && !loading && !error}
+        onClose={() => setShowSuccessModal(false)}
+        pnrOverride={pnr}
+      />
 
       {/* Footer */}
       <footer className={`border-t mt-auto py-8 px-4 text-center text-xs transition-colors ${

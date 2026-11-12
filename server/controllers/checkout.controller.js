@@ -129,7 +129,7 @@ async function createCheckout(req, res) {
       const dob       = resolvePassengerDob(p.dob, p.age);
       const nationality = p.nationality?.trim() || 'Indian';
       const seatNumber  = p.seatNo || p.seatNumber || `1${String.fromCharCode(65 + (i % 6))}`;
-      const foodOption  = (p.foodOption || p.mealPreference || 'VEG').toUpperCase();
+      const foodOption  = (p.mealPreference || p.foodOption || 'Standard Non-Veg').trim();
 
       if (!firstName || !lastName) {
         await t.rollback();
@@ -358,6 +358,8 @@ async function createCheckout(req, res) {
         currency: newBooking.currency,
         stripeSessionId: stripeSessionResult.sessionId,
         checkoutUrl: stripeSessionResult.checkoutUrl,
+        successUrl: stripeSessionResult.successUrl,
+        cancelUrl: stripeSessionResult.cancelUrl,
         paymentGateway: stripeSessionResult.paymentGateway,
         isOfflineSimulation: stripeSessionResult.isOfflineSimulation,
         sandboxNotice: stripeSessionResult.notice

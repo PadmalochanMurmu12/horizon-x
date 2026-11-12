@@ -191,7 +191,18 @@ const initialState = {
     isSeatMapOpen: false,
     seatMapActivePaxIndex: 0,
     isSubmitting: false,
-    errorMessage: null
+    errorMessage: null,
+    isSuccessModalOpen: false,
+    isDeclinedModalOpen: false
+  },
+  payment: {
+    status: 'IDLE', // 'IDLE' | 'PROCESSING' | 'SUCCESS' | 'DECLINED'
+    successUrl: null,
+    cancelUrl: null,
+    pnr: null,
+    sessionId: null,
+    errorMessage: null,
+    lastUpdated: null
   },
   bookingResult: null
 };
@@ -463,8 +474,54 @@ export const bookingSlice = createSlice({
 
     setBookingResult: (state, action) => {
       state.bookingResult = action.payload;
+      if (action.payload?.successUrl) state.payment.successUrl = action.payload.successUrl;
+      if (action.payload?.cancelUrl) state.payment.cancelUrl = action.payload.cancelUrl;
+      if (action.payload?.pnr) state.payment.pnr = action.payload.pnr;
+      if (action.payload?.stripeSessionId) state.payment.sessionId = action.payload.stripeSessionId;
       state.ui.isSubmitting = false;
       state.ui.errorMessage = null;
+    },
+
+    setPaymentUrls: (state, action) => {
+      const { successUrl, cancelUrl } = action.payload || {};
+      if (successUrl) state.payment.successUrl = successUrl;
+      if (cancelUrl) state.payment.cancelUrl = cancelUrl;
+    },
+
+    setPaymentSuccess: (state, action) => {
+      const { successUrl, pnr, sessionId } = action.payload || {};
+      state.payment.status = 'SUCCESS';
+      if (successUrl) state.payment.successUrl = successUrl;
+      if (pnr) state.payment.pnr = pnr;
+      if (sessionId) state.payment.sessionId = sessionId;
+      state.payment.lastUpdated = new Date().toISOString();
+      state.ui.isSuccessModalOpen = true;
+      state.ui.isDeclinedModalOpen = false;
+      state.ui.isSubmitting = false;
+    },
+
+    setPaymentDeclined: (state, action) => {
+      const { cancelUrl, errorMessage } = action.payload || {};
+      state.payment.status = 'DECLINED';
+      if (cancelUrl) state.payment.cancelUrl = cancelUrl;
+      if (errorMessage) state.payment.errorMessage = errorMessage;
+      state.payment.lastUpdated = new Date().toISOString();
+      state.ui.isDeclinedModalOpen = true;
+      state.ui.isSuccessModalOpen = false;
+      state.ui.isSubmitting = false;
+    },
+
+    setSuccessModalOpen: (state, action) => {
+      state.ui.isSuccessModalOpen = Boolean(action.payload);
+    },
+
+    setDeclinedModalOpen: (state, action) => {
+      state.ui.isDeclinedModalOpen = Boolean(action.payload);
+    },
+
+    closePaymentModals: (state) => {
+      state.ui.isSuccessModalOpen = false;
+      state.ui.isDeclinedModalOpen = false;
     },
 
     resetBooking: () => {
@@ -496,6 +553,12 @@ export const {
   setCheckoutLoading,
   setCheckoutError,
   setBookingResult,
+  setPaymentUrls,
+  setPaymentSuccess,
+  setPaymentDeclined,
+  setSuccessModalOpen,
+  setDeclinedModalOpen,
+  closePaymentModals,
   resetBooking
 } = bookingSlice.actions;
 
