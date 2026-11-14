@@ -6,6 +6,10 @@ const {
   generateFlightTicket,
   generateBoardingPass
 } = require('../utils/document.generator');
+const {
+  generateTicketPdfBuffer,
+  generateBoardingPassPdfBuffer
+} = require('../services/pdfRenderer.service');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'horizon_x_secret_key';
 
@@ -198,6 +202,23 @@ async function getETicket(req, res) {
       return res.send(htmlContent);
     }
 
+    if (format === 'pdf') {
+      try {
+        const ticketData = generateFlightTicket(booking, 'json');
+        const pdfBuffer = await generateTicketPdfBuffer(ticketData);
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `${download === 'true' ? 'attachment' : 'inline'}; filename="ETicket-${formattedPnr}.pdf"`);
+        res.setHeader('Content-Length', pdfBuffer.length);
+        return res.send(pdfBuffer);
+      } catch (pdfErr) {
+        console.error('Vector PDF generation error on server:', pdfErr);
+        return res.status(500).json({
+          success: false,
+          error: 'PDF generation failed on server: ' + pdfErr.message
+        });
+      }
+    }
+
     // Default JSON
     const ticketData = generateFlightTicket(booking, 'json');
     return res.status(200).json({
@@ -283,6 +304,23 @@ async function getBoardingPass(req, res) {
         res.setHeader('Content-Disposition', `attachment; filename="BoardingPass-${formattedPnr}.html"`);
       }
       return res.send(htmlContent);
+    }
+
+    if (format === 'pdf') {
+      try {
+        const bpData = generateBoardingPass(booking, 'json', Number(passengerIndex));
+        const pdfBuffer = await generateBoardingPassPdfBuffer(bpData);
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `${download === 'true' ? 'attachment' : 'inline'}; filename="BoardingPass-${formattedPnr}.pdf"`);
+        res.setHeader('Content-Length', pdfBuffer.length);
+        return res.send(pdfBuffer);
+      } catch (pdfErr) {
+        console.error('Vector Boarding Pass PDF generation error on server:', pdfErr);
+        return res.status(500).json({
+          success: false,
+          error: 'Boarding pass PDF generation failed on server: ' + pdfErr.message
+        });
+      }
     }
 
     // Default JSON

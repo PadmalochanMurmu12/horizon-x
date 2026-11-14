@@ -4,6 +4,7 @@ import { USER_ENDPOINTS } from '../services/api';
 import { 
   downloadTicketPdf, 
   downloadBoardingPassPdf, 
+  savePdfBlobToDevice,
   generateSvgBarcode, 
   generate2DMatrixBarcodeSvg, 
   getAirlineLogo, 
@@ -99,10 +100,34 @@ export default function MyBookingsPage({ defaultTab = 'ALL' }) {
     if (!previewDoc || !previewDoc.data) return;
     setIsDownloadingPdf(true);
     try {
-      if (previewDoc.type === 'TICKET') {
-        await downloadTicketPdf(previewDoc.data);
-      } else {
-        await downloadBoardingPassPdf(previewDoc.data);
+      const pnr = previewDoc.pnr || previewDoc.data.pnr;
+      const filename = previewDoc.type === 'TICKET' ? `ETicket-${pnr}.pdf` : `BoardingPass-${pnr}.pdf`;
+      const endpoint = previewDoc.type === 'TICKET' 
+        ? USER_ENDPOINTS.TICKET(pnr, 'pdf', true)
+        : USER_ENDPOINTS.BOARDING_PASS(pnr, 'pdf', true);
+
+      let downloadedViaServer = false;
+      try {
+        const res = await fetch(endpoint);
+        const contentType = res.headers.get('content-type') || '';
+        if (res.ok && contentType.includes('application/pdf')) {
+          const blob = await res.blob();
+          if (blob && blob.size > 0) {
+            await savePdfBlobToDevice(blob, filename);
+            downloadedViaServer = true;
+          }
+        }
+      } catch (serverErr) {
+        console.warn('Server-side PDF endpoint unavailable, falling back to client engine:', serverErr);
+      }
+
+      // Fallback to client generator if server endpoint didn't deliver
+      if (!downloadedViaServer) {
+        if (previewDoc.type === 'TICKET') {
+          await downloadTicketPdf(previewDoc.data);
+        } else {
+          await downloadBoardingPassPdf(previewDoc.data);
+        }
       }
     } catch (err) {
       console.error('PDF generation error:', err);
@@ -848,7 +873,8 @@ export default function MyBookingsPage({ defaultTab = 'ALL' }) {
                   const foodOption = data.foodOption || data.mealPreference || 'Gluten-Free Meal';
                   const cleanMeal = formatCleanMealName(foodOption);
                   const ssrMealCode = data.ssrCode || getSsrMealCode(foodOption);
-                  const bagTagRef = data.baggageTag || `SK-${Math.floor(100000 + Math.random() * 900000)}`;
+                  const rawBagTag = data.baggageTag || `SK-${Math.floor(100000 + Math.random() * 900000)}`;
+                  const bagTagRef = String(rawBagTag).replace(/\s*•\s*CABIN:\s*\d+KG/gi, '').trim();
                   const barcodeString = data.barcodeString || `M1${passengerName.padEnd(20, ' ')}E${pnr} ${originCode}${destCode}${carrierCode} ${flightNumber.replace(/[^0-9]/g, '').padStart(4, '0')} 285Y${seatNumber.padEnd(4, ' ')}${seqNumber} 147>2180`;
                   const airlineLogo = getAirlineLogo(carrierCode, carrier);
 
@@ -873,14 +899,14 @@ export default function MyBookingsPage({ defaultTab = 'ALL' }) {
                               )}
                               <div>
                                 <h4 className="text-sm font-black text-[#005cab] tracking-tight">{carrier.toUpperCase()}</h4>
-                                <p className="text-xs text-[#1b1c1c] font-bold">FLIGHT {flightNumber} • {departureDate}</p>
+                                <p className="text-xs text-[#1b1c1c] font-bold whitespace-nowrap">FLIGHT {flightNumber} • {departureDate}</p>
                               </div>
                             </div>
                             {/* Indicators Badge Row */}
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <span className="px-2.5 py-1 bg-[#005cab] text-white font-sans text-[10px] font-bold rounded">DOCS OK</span>
-                              <span className="px-2.5 py-1 bg-[#d3e1f6] text-[#005cab] font-sans text-[10px] font-bold rounded">SKY PRIORITY</span>
-                              <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 font-sans text-[10px] font-bold rounded">SSR: {ssrMealCode}</span>
+                            <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                              <span className="px-2.5 py-1 bg-[#005cab] text-white font-sans text-[10px] font-bold rounded whitespace-nowrap shrink-0">DOCS OK</span>
+                              <span className="px-2.5 py-1 bg-[#d3e1f6] text-[#005cab] font-sans text-[10px] font-bold rounded whitespace-nowrap shrink-0">SKY PRIORITY</span>
+                              <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 font-sans text-[10px] font-bold rounded whitespace-nowrap shrink-0">SSR: {ssrMealCode}</span>
                             </div>
                           </div>
 
@@ -978,8 +1004,8 @@ export default function MyBookingsPage({ defaultTab = 'ALL' }) {
                         <div className="lg:w-4/12 p-6 bg-[#fbf9f8] flex flex-col justify-between pt-7 border-t lg:border-t-0 border-[#E6E6E6]">
                           <div>
                             <div className="flex items-center justify-between pb-3 border-b border-[#E6E6E6]">
-                              <span className="text-lg font-black text-[#005cab] tracking-tight">{carrier}</span>
-                              <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#005cab]">FLIGHT STUB</span>
+                              <span className="text-base font-black text-[#005cab] tracking-tight whitespace-nowrap">{carrier.replace(/\s*\([A-Z0-9]+\)/gi, '').trim()}</span>
+                              <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#005cab] whitespace-nowrap">FLIGHT STUB</span>
                             </div>
                             <div className="mt-3.5 space-y-2.5">
                               <div>

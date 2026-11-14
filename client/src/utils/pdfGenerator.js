@@ -1,3 +1,4 @@
+import { toJpeg } from 'html-to-image';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { AIRLINE_LOGOS_B64 } from './airlineLogosBase64';
@@ -22,6 +23,11 @@ export const AIRPORT_DIRECTORY = {
   GAU: { city: 'Guwahati', name: 'Lokpriya Gopinath Bordoloi Intl Airport', terminal: 'Terminal 1', shortTerm: 'T1' }
 };
 
+// Reusable vector SVG icons to avoid OS-dependent fallback glyphs and baseline shifting
+const ICON_CHECK = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block; vertical-align:middle; margin-right:4px;"><polyline points="20 6 9 17 4 12"/></svg>`;
+const ICON_PLANE = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block; vertical-align:middle;"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>`;
+const ICON_DOT = `<svg width="6" height="6" viewBox="0 0 8 8" fill="currentColor" style="display:inline-block; vertical-align:middle; margin-right:4px;"><circle cx="4" cy="4" r="3"/></svg>`;
+
 /**
  * Resolves authentic carrier logo base64 image from airline code or name.
  */
@@ -31,6 +37,7 @@ export function getAirlineLogo(carrierCode, carrierName) {
   }
   const name = String(carrierName || '').toLowerCase();
   const code = String(carrierCode || '').toUpperCase();
+  if (name.includes('indiaone') || code === 'I7') return AIRLINE_LOGOS_B64['I7'];
   if (name.includes('indigo') || code === '6E') return AIRLINE_LOGOS_B64['6E'];
   if (name.includes('air india express') || code === 'IX') return AIRLINE_LOGOS_B64['IX'];
   if (name.includes('air india') || code === 'AI') return AIRLINE_LOGOS_B64['AI'];
@@ -170,7 +177,7 @@ export function generateSvgBarcode(code, width = 360, height = 44) {
  * Generates an authentic High-Density SVG 2D Matrix Barcode (IATA BCBP Aztec standard format).
  * Features real central bullseye finder pattern with high-density binary micro-modules.
  */
-export function generate2DMatrixBarcodeSvg(dataString, width = 76, height = 76) {
+export function generate2DMatrixBarcodeSvg(dataString, width = 72, height = 72) {
   const str = String(dataString || 'M1TRAVELER/NAME');
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -213,7 +220,7 @@ export function generate2DMatrixBarcodeSvg(dataString, width = 76, height = 76) 
  * Prompts user for save location and path using window.showSaveFilePicker if available,
  * or gracefully falls back to standard anchor download.
  */
-async function savePdfBlobToDevice(blob, defaultFilename) {
+export async function savePdfBlobToDevice(blob, defaultFilename) {
   if (typeof window !== 'undefined' && 'showSaveFilePicker' in window) {
     try {
       const handle = await window.showSaveFilePicker({
@@ -251,13 +258,6 @@ async function savePdfBlobToDevice(blob, defaultFilename) {
  * =========================================================================
  * 1. STANDALONE ELECTRONIC TICKET RECEIPT (E-TICKET)
  * =========================================================================
- * Incorporates all 6 mandatory aviation categories:
- * 1. Booking & Identification Numbers (PNR, E-Ticket No, Agency Booking ID, Issue Date & Place)
- * 2. Passenger Details (Full Legal Name, Passenger Type, Frequent Flyer No, Contact Info)
- * 3. Flight Itinerary (Airline & Flight No, Origin & Destination, Terminals, Dates & Times, Status)
- * 4. Fare & Payment Breakdown (Base Fare, Surcharges & Fees UDF/PSF/ASF, Taxes, Total, Form of Payment, Fare Basis)
- * 5. Baggage & Seat Details (Checked & Carry-On Allowances, Seat Assignment, SSR Notes)
- * 6. Legal & Regulatory Notices (Endorsements & Restrictions, Montreal Convention, Ticket Validity)
  */
 export async function downloadTicketPdf(ticket) {
   if (!ticket) return;
@@ -279,6 +279,7 @@ export async function downloadTicketPdf(ticket) {
   const airlineCode = primarySector.airlineCode || flightNo.split('-')[0] || 'SK';
   const aircraft = primarySector.aircraft || 'Airbus A321neo';
   const cabin = ticket.cabinClass || 'ECONOMY';
+  const fareBasis = ticket.fareBasis || primarySector.fareBasis || 'YFLX26 / Standard Saver';
   const ticketNo = primaryPax.ticketNumber || ticket.eTicketNumber || '402-9823410921-01';
   const agencyBookingId = ticket.agencyBookingId || `SKY-2026-${pnr}920`;
   const issueDateOnly = cleanIssueDate(ticket.issueDate || ticket.bookingDate || '12 Nov 2026');
@@ -311,9 +312,9 @@ export async function downloadTicketPdf(ticket) {
   const totalAmountFormatted = totalAmountNum.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const airlineLogoB64 = getAirlineLogo(airlineCode, airline);
-  const barcodeSvg = generateSvgBarcode(`*HX-${pnr}-${ticketNo}*`, 420, 42);
+  const barcodeSvg = generateSvgBarcode(`*HX-${pnr}-${ticketNo}*`, 380, 42);
 
-  // Build A4 Printable Container (Pixel-perfect A4 styling)
+  // Build A4 Printable Container (Inter font, pixel-perfect 794px width)
   const container = document.createElement('div');
   container.style.position = 'fixed';
   container.style.top = '0';
@@ -324,49 +325,59 @@ export async function downloadTicketPdf(ticket) {
   container.style.width = '794px';
   container.style.backgroundColor = '#ffffff';
   container.style.color = '#1b1c1c';
-  container.style.fontFamily = 'Arial, Helvetica, sans-serif';
-  container.style.padding = '30px 38px';
+  container.style.fontFamily = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+  container.style.padding = '28px 36px';
   container.style.boxSizing = 'border-box';
   container.style.lineHeight = '1.4';
 
   container.innerHTML = `
-    <!-- Top Branding Header (No IATA Accredited Agent, 100% Responsive) -->
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+      * { box-sizing: border-box; }
+    </style>
+
+    <!-- Top Branding Header (Zero Drift with Preview) -->
     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #005cab; padding-bottom: 14px; margin-bottom: 16px;">
       <div style="display: flex; align-items: center; gap: 12px;">
-        <div style="width: 42px; height: 42px; border-radius: 10px; background: #005cab; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 900; flex-shrink: 0;">✈</div>
+        ${airlineLogoB64 
+          ? `<img src="${airlineLogoB64}" style="height: 38px; width: auto; max-width: 120px; object-fit: contain; border-radius: 6px; flex-shrink: 0;" alt="${airline}" />`
+          : `<div style="width: 38px; height: 38px; border-radius: 8px; background: #005cab; color: #ffffff; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+               <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>
+             </div>`
+        }
         <div>
-          <div style="display: flex; align-items: center; gap: 10px;">
-            <span style="font-size: 24px; font-weight: 900; color: #005cab; letter-spacing: -0.5px;">Horizon-X</span>
-            <span style="font-size: 11px; font-weight: 800; text-transform: uppercase; padding: 3px 10px; border-radius: 6px; background: #F2F8FF; color: #005cab; border: 1px solid #d3e1f6;">${airline} (${airlineCode})</span>
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: nowrap;">
+            <span style="font-size: 22px; font-weight: 900; color: #005cab; letter-spacing: -0.5px; white-space: nowrap;">Horizon-X</span>
+            <span style="font-size: 11px; font-weight: 800; text-transform: uppercase; padding: 3px 10px; border-radius: 6px; background: #F2F8FF; color: #005cab; border: 1px solid #d3e1f6; white-space: nowrap; flex-shrink: 0;">${airline} (${airlineCode})</span>
           </div>
           <div style="font-size: 11px; font-weight: 600; color: #566476; margin-top: 2px;">
             Official Electronic Ticket Receipt &amp; Tax Invoice
           </div>
         </div>
       </div>
-      <div style="text-align: right;">
-        <span style="display: inline-block; font-size: 11px; font-weight: 800; text-transform: uppercase; color: #00A698; background: #e6f6f4; border: 1px solid #a7f3d0; padding: 5px 12px; border-radius: 6px; letter-spacing: 0.5px;">
-          ✓ CONFIRMED (PAID)
+      <div style="text-align: right; flex-shrink: 0;">
+        <span style="display: inline-flex; align-items: center; font-size: 11px; font-weight: 800; text-transform: uppercase; color: #047857; background: #ecfdf5; border: 1px solid #a7f3d0; padding: 5px 12px; border-radius: 6px; white-space: nowrap; flex-shrink: 0; line-height: 1;">
+          ${ICON_CHECK} CONFIRMED (PAID)
         </span>
       </div>
     </div>
 
-    <!-- 1. Booking & Identification Numbers Grid (No Coupon Active, Clean Issue Date) -->
+    <!-- 1. Booking & Identification Numbers Grid -->
     <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; background: #F2F8FF; border: 1px solid #d3e1f6; border-radius: 10px; padding: 12px 16px; margin-bottom: 16px;">
       <div>
-        <div style="font-size: 9px; font-weight: 800; text-transform: uppercase; color: #566476;">Booking Ref (PNR)</div>
+        <div style="font-size: 9px; font-weight: 800; text-transform: uppercase; color: #566476; letter-spacing: 0.5px;">Booking Ref (PNR)</div>
         <div style="font-size: 18px; font-weight: 900; color: #005cab; font-family: monospace; letter-spacing: 1px; margin-top: 2px;">${pnr}</div>
       </div>
       <div>
-        <div style="font-size: 9px; font-weight: 800; text-transform: uppercase; color: #566476;">E-Ticket Number</div>
+        <div style="font-size: 9px; font-weight: 800; text-transform: uppercase; color: #566476; letter-spacing: 0.5px;">E-Ticket Number</div>
         <div style="font-size: 12px; font-weight: 800; color: #1b1c1c; font-family: monospace; margin-top: 4px;">${ticketNo}</div>
       </div>
       <div>
-        <div style="font-size: 9px; font-weight: 800; text-transform: uppercase; color: #566476;">Agency Booking ID</div>
+        <div style="font-size: 9px; font-weight: 800; text-transform: uppercase; color: #566476; letter-spacing: 0.5px;">Agency Booking ID</div>
         <div style="font-size: 12px; font-weight: 700; color: #1b1c1c; font-family: monospace; margin-top: 4px;">${agencyBookingId}</div>
       </div>
       <div>
-        <div style="font-size: 9px; font-weight: 800; text-transform: uppercase; color: #566476;">Issue Date</div>
+        <div style="font-size: 9px; font-weight: 800; text-transform: uppercase; color: #566476; letter-spacing: 0.5px;">Issue Date</div>
         <div style="font-size: 12px; font-weight: 700; color: #1b1c1c; margin-top: 4px;">${issueDateOnly}</div>
       </div>
     </div>
@@ -400,21 +411,21 @@ export async function downloadTicketPdf(ticket) {
         <div style="font-size: 11px; font-weight: 800; color: #005cab; text-transform: uppercase; letter-spacing: 0.5px;">
           2. Flight Itinerary &amp; Timetable
         </div>
-        <span style="font-size: 10px; font-weight: 800; background: #d3e1f6; color: #005cab; padding: 3px 10px; border-radius: 4px; white-space: nowrap; flex-shrink: 0;">
-          ● CONFIRMED / OK
+        <span style="display: inline-flex; align-items: center; font-size: 10px; font-weight: 800; background: #d3e1f6; color: #005cab; padding: 4px 10px; border-radius: 4px; white-space: nowrap; flex-shrink: 0; line-height: 1;">
+          ${ICON_DOT} CONFIRMED / OK
         </span>
       </div>
 
       <div style="border: 1px solid #E6E6E6; border-radius: 10px; padding: 14px 18px; background: #ffffff;">
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #E6E6E6; padding-bottom: 8px; margin-bottom: 12px;">
           <div style="display: flex; align-items: center; gap: 8px;">
-            ${airlineLogoB64 ? `<img src="${airlineLogoB64}" style="height: 22px; width: auto; object-fit: contain; border-radius: 4px;" alt="${airline}" />` : ''}
-            <span style="font-size: 12px; font-weight: 800; color: #005cab;">Flight ${flightNo}</span>
-            <span style="font-size: 11px; font-weight: 700; color: #1b1c1c;">${aircraft}</span>
-            <span style="font-size: 10px; color: #566476;">• Operated by ${airline}</span>
+            ${airlineLogoB64 ? `<img src="${airlineLogoB64}" style="height: 20px; width: auto; object-fit: contain; border-radius: 4px; flex-shrink: 0;" alt="${airline}" />` : ''}
+            <span style="font-size: 12px; font-weight: 800; color: #005cab; white-space: nowrap;">Flight ${flightNo}</span>
+            <span style="font-size: 11px; font-weight: 700; color: #1b1c1c; white-space: nowrap;">${aircraft}</span>
+            <span style="font-size: 10px; color: #566476; white-space: nowrap;">• Operated by ${airline}</span>
           </div>
-          <div style="font-size: 10px; color: #566476;">
-            Cabin: <strong style="color: #1b1c1c;">${cabin} (Standard Saver)</strong>
+          <div style="font-size: 10px; color: #566476; white-space: nowrap; flex-shrink: 0;">
+            Cabin: <strong style="color: #1b1c1c;">${cabin} (${fareBasis})</strong>
           </div>
         </div>
 
@@ -425,20 +436,20 @@ export async function downloadTicketPdf(ticket) {
             <div style="font-size: 13px; font-weight: 800; color: #1b1c1c; margin-top: 4px; padding: 2px 0;">${originInfo.city}</div>
             <div style="font-size: 11px; color: #566476; margin-top: 1px; line-height: 1.3;">${originInfo.name}</div>
             <div style="font-size: 13px; font-weight: 800; color: #005cab; margin-top: 6px;">${depTime}</div>
-            <div style="display: inline-block; font-size: 10px; font-weight: 800; color: #005cab; background: #e0f2fe; border: 1px solid #bae6fd; padding: 2px 8px; border-radius: 4px; margin-top: 5px;">
+            <div style="display: inline-block; font-size: 10px; font-weight: 800; color: #005cab; background: #e0f2fe; border: 1px solid #bae6fd; padding: 2px 8px; border-radius: 4px; margin-top: 5px; white-space: nowrap;">
               ${originInfo.terminal || 'Terminal 3'} (Departure)
             </div>
           </div>
 
           <!-- Journey Indicator -->
-          <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 10px;">
-            <div style="font-size: 10px; font-weight: 700; color: #525f71;">${duration} • Non-Stop</div>
+          <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 10px; flex-shrink: 0;">
+            <div style="font-size: 10px; font-weight: 700; color: #525f71; white-space: nowrap;">${duration} • Non-Stop</div>
             <div style="display: flex; align-items: center; width: 100%; max-width: 140px; margin: 6px 0;">
               <div style="height: 2px; flex: 1; background: #c0c7d6;"></div>
-              <div style="color: #005cab; font-size: 14px; margin: 0 4px;">✈</div>
+              <div style="color: #005cab; margin: 0 4px; display: flex; align-items: center;">${ICON_PLANE}</div>
               <div style="height: 2px; flex: 1; background: #c0c7d6;"></div>
             </div>
-            <div style="font-size: 9px; color: #00A698; font-weight: 700;">Direct Flight</div>
+            <div style="font-size: 9px; color: #047857; font-weight: 700; white-space: nowrap;">Direct Flight</div>
           </div>
 
           <!-- Destination -->
@@ -447,7 +458,7 @@ export async function downloadTicketPdf(ticket) {
             <div style="font-size: 13px; font-weight: 800; color: #1b1c1c; margin-top: 4px; padding: 2px 0;">${destInfo.city}</div>
             <div style="font-size: 11px; color: #566476; margin-top: 1px; line-height: 1.3;">${destInfo.name}</div>
             <div style="font-size: 13px; font-weight: 800; color: #005cab; margin-top: 6px;">${arrTime}</div>
-            <div style="display: inline-block; font-size: 10px; font-weight: 800; color: #005cab; background: #e0f2fe; border: 1px solid #bae6fd; padding: 2px 8px; border-radius: 4px; margin-top: 5px;">
+            <div style="display: inline-block; font-size: 10px; font-weight: 800; color: #005cab; background: #e0f2fe; border: 1px solid #bae6fd; padding: 2px 8px; border-radius: 4px; margin-top: 5px; white-space: nowrap;">
               ${destInfo.terminal || 'Terminal 2'} (Arrival)
             </div>
           </div>
@@ -464,7 +475,7 @@ export async function downloadTicketPdf(ticket) {
         <div style="border: 1px solid #E6E6E6; border-radius: 8px; padding: 8px 12px; background: #fbf9f8;">
           <div style="font-size: 9px; font-weight: 700; text-transform: uppercase; color: #566476;">Checked Baggage</div>
           <div style="font-size: 12px; font-weight: 800; color: #1b1c1c; margin-top: 2px;">1 Piece (15 kg)</div>
-          <div style="font-size: 9px; color: #00A698; font-weight: 700;">Included with Fare</div>
+          <div style="font-size: 9px; color: #047857; font-weight: 700;">Included with Fare</div>
         </div>
         <div style="border: 1px solid #E6E6E6; border-radius: 8px; padding: 8px 12px; background: #fbf9f8;">
           <div style="font-size: 9px; font-weight: 700; text-transform: uppercase; color: #566476;">Carry-On Baggage</div>
@@ -479,12 +490,12 @@ export async function downloadTicketPdf(ticket) {
         <div style="border: 1px solid #E6E6E6; border-radius: 8px; padding: 8px 12px; background: #fbf9f8;">
           <div style="font-size: 9px; font-weight: 700; text-transform: uppercase; color: #566476;">Meal Preference</div>
           <div style="font-size: 12px; font-weight: 800; color: #1b1c1c; margin-top: 2px;">${fullMealName}</div>
-          <div style="font-size: 9px; color: #00A698; font-weight: 700;">✓ Confirmed with Catering</div>
+          <div style="font-size: 9px; color: #047857; font-weight: 700; display: flex; align-items: center;">${ICON_CHECK} Confirmed with Catering</div>
         </div>
       </div>
     </div>
 
-    <!-- 5. Fare & Payment Breakdown (Base Fare + Admin Capped Fees ONLY, No Payment Method) -->
+    <!-- 5. Fare & Payment Breakdown (Base Fare + Admin Capped Fees ONLY, No Fake Fees, No Payment Method) -->
     <div style="margin-bottom: 16px;">
       <div style="font-size: 11px; font-weight: 800; color: #005cab; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">
         4. Fare &amp; Payment Breakdown
@@ -493,18 +504,18 @@ export async function downloadTicketPdf(ticket) {
         <div style="font-size: 11px; color: #1b1c1c;">
           <div style="display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #E6E6E6;">
             <span>Air Transportation Base Fare</span>
-            <span style="font-family: Arial, Helvetica, sans-serif; font-weight: 800;">${currencySymbol}${baseFareFormatted}</span>
+            <span style="font-weight: 800;">${currencySymbol}${baseFareFormatted}</span>
           </div>
           <div style="display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #E6E6E6;">
             <span>Convenience &amp; Platform Fee (Admin Capped)</span>
-            <span style="font-family: Arial, Helvetica, sans-serif; font-weight: 800;">${currencySymbol}${platformFeeFormatted}</span>
+            <span style="font-weight: 800;">${currencySymbol}${platformFeeFormatted}</span>
           </div>
           <div style="display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #E6E6E6; color: #566476;">
             <span>Seat Selection</span>
-            <span style="font-family: Arial, Helvetica, sans-serif; font-weight: 700; color: #00A698;">Included (${currencySymbol}0.00)</span>
+            <span style="font-weight: 700; color: #047857;">Included (${currencySymbol}0.00)</span>
           </div>
           <div style="font-size: 9px; color: #566476; margin-top: 6px; font-style: italic;">
-            Fare Basis: Standard Saver | Non-endorsable. Changes eligible up to 24h prior to departure.
+            Fare Basis: ${fareBasis} | Non-endorsable. Re-issue and changes eligible up to 24h prior to departure.
           </div>
         </div>
 
@@ -512,10 +523,10 @@ export async function downloadTicketPdf(ticket) {
           <div>
             <div style="font-size: 9px; font-weight: 800; text-transform: uppercase; color: #566476;">Total Amount Invoiced</div>
             <div style="font-size: 26px; font-weight: 900; color: #005cab; margin: 4px 0;">
-              ${currencySymbol}${totalAmountFormatted} <span style="font-size: 12px; font-family: Arial, Helvetica, sans-serif; font-weight: 800; color: #1b1c1c;">${currencyCode}</span>
+              ${currencySymbol}${totalAmountFormatted} <span style="font-size: 12px; font-weight: 800; color: #1b1c1c;">${currencyCode}</span>
             </div>
-            <div style="display: inline-block; font-size: 10px; font-weight: 800; color: #00A698; background: #e6f6f4; border: 1px solid #a7f3d0; padding: 3px 8px; border-radius: 4px; margin-top: 4px;">
-              ✓ PAID IN FULL
+            <div style="display: inline-flex; align-items: center; font-size: 10px; font-weight: 800; color: #047857; background: #ecfdf5; border: 1px solid #a7f3d0; padding: 4px 10px; border-radius: 4px; margin-top: 4px; white-space: nowrap;">
+              ${ICON_CHECK} PAID IN FULL
             </div>
           </div>
         </div>
@@ -525,12 +536,12 @@ export async function downloadTicketPdf(ticket) {
     <!-- 6. Legal & Regulatory Notices -->
     <div style="border-top: 1px solid #E6E6E6; padding-top: 10px; font-size: 9px; color: #566476; line-height: 1.4;">
       <div style="font-weight: 800; color: #1b1c1c; text-transform: uppercase; font-size: 8.5px; margin-bottom: 2px;">
-        Notice of Carriage Conditions & Montreal Convention 1999:
+        Notice of Carriage Conditions &amp; Montreal Convention 1999:
       </div>
       <div>
         Air carriage is subject to the conditions of carriage and liability rules established by the Montreal Convention 1999. Valid for travel for 1 year from date of issue. Baggage claims must be reported within codified limits.
       </div>
-      <div style="display: flex; gap: 14px; margin-top: 4px; font-weight: 700; color: #1b1c1c;">
+      <div style="display: flex; gap: 14px; margin-top: 4px; font-weight: 700; color: #1b1c1c; white-space: nowrap;">
         <span>• Check-in counters close 60 mins before departure</span>
         <span>• Lithium batteries in carry-on only</span>
         <span>• Government Photo ID mandatory</span>
@@ -548,27 +559,49 @@ export async function downloadTicketPdf(ticket) {
   document.body.appendChild(container);
 
   try {
-    const canvas = await html2canvas(container, {
-      scale: 2, // 200 DPI high-definition print quality
-      useCORS: true,
-      logging: false,
-      backgroundColor: '#ffffff'
-    });
+    if (document.fonts?.ready) {
+      await document.fonts.ready;
+    }
 
-    // High quality JPEG compression (reduces size from 15MB+ PNG down to <700KB)
-    const imgData = canvas.toDataURL('image/jpeg', 0.92);
+    let imgData;
+    let imgHeight;
+    const pageWidth = 595.28;
+    const pageHeight = 841.89;
+
+    try {
+      imgData = await toJpeg(container, {
+        quality: 0.95,
+        pixelRatio: 2,
+        backgroundColor: '#ffffff'
+      });
+      const elWidth = container.offsetWidth || 794;
+      const elHeight = container.offsetHeight || 1123;
+      imgHeight = (elHeight * pageWidth) / elWidth;
+    } catch (toImgErr) {
+      console.warn('html-to-image render fallback to html2canvas:', toImgErr);
+      const canvas = await html2canvas(container, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+        scrollX: 0,
+        scrollY: 0,
+        windowWidth: 794
+      });
+      imgData = canvas.toDataURL('image/jpeg', 0.92);
+      imgHeight = (canvas.height * pageWidth) / canvas.width;
+    }
+
+    const pdfHeight = Math.max(pageHeight, imgHeight);
+
     const pdf = new jsPDF({
       orientation: 'portrait',
       unit: 'pt',
-      format: 'a4',
+      format: [pageWidth, pdfHeight],
       compress: true
     });
 
-    const pageWidth = 595.28;
-    const pageHeight = 841.89;
-    const imgHeight = (canvas.height * pageWidth) / canvas.width;
-
-    pdf.addImage(imgData, 'JPEG', 0, 0, pageWidth, Math.min(pageHeight, imgHeight), undefined, 'FAST');
+    pdf.addImage(imgData, 'JPEG', 0, 0, pageWidth, imgHeight, undefined, 'FAST');
     const pdfBlob = pdf.output('blob');
     const filename = `ETicket-${pnr}.pdf`;
 
@@ -582,13 +615,6 @@ export async function downloadTicketPdf(ticket) {
  * =========================================================================
  * 2. STANDALONE OFFICIAL BOARDING PASS (IATA BCBP RESOLUTION 722e/792)
  * =========================================================================
- * Incorporates all 6 mandatory aviation categories in a realistic 2-panel architecture:
- * 1. Scannable Barcode (BCBP 2D Aztec/PDF417 + Linear 1D barcode on coupon)
- * 2. Passenger & Booking Identifiers (Name formatted LAST/FIRST TITLE, PNR, E-Ticket, SEQ, Frequent Flyer)
- * 3. Flight & Route Details (Operating Carrier, Flight No, Origin & Destination with codes, Date)
- * 4. Airport & Boarding Logistics (Terminal, Gate, Boarding Time, Gate Closure warning, Departure Time)
- * 5. Seating & Cabin Details (Assigned Seat high-visibility box, Cabin Class Y, Boarding Zone/Group)
- * 6. Special Indicators & Security (SSR codes, SKY PRIORITY, DOCS OK, Baggage Tag reference)
  */
 export async function downloadBoardingPassPdf(bp) {
   if (!bp) return;
@@ -599,6 +625,7 @@ export async function downloadBoardingPassPdf(bp) {
   const carrier = bp.carrier || 'Skybound Wings';
   const flightNumber = bp.flightNumber || 'SK-402';
   const carrierCode = (bp.carrierCode || flightNumber.split('-')[0] || 'SK').toUpperCase();
+  const carrierBrand = carrier.replace(/\s*\([A-Z0-9]+\)/gi, '').trim();
 
   const originCode = (bp.origin || 'DEL').toUpperCase();
   const destCode = (bp.destination || 'BLR').toUpperCase();
@@ -610,7 +637,6 @@ export async function downloadBoardingPassPdf(bp) {
   const cabinClass = (bp.cabinClass || 'ECONOMY').toUpperCase();
   const flightTimes = calculateFlightTimes(bp.departureTime || bp.scheduledDeparture || '21:10');
   const departureDate = cleanIssueDate(bp.departureDate || '12 Oct 2026');
-  const departureTime = bp.departureTime ? cleanTimeDisplay(bp.departureTime) : flightTimes.departureTime;
   const boardingTime = flightTimes.boardingTime;
   const gateCloseTime = flightTimes.gateCloseTime;
   const terminal = bp.terminal || originInfo.terminal || 'Terminal 3';
@@ -620,8 +646,9 @@ export async function downloadBoardingPassPdf(bp) {
   const ticketNumber = bp.ticketNumber || '402-9823410921';
   const foodOption = bp.foodOption || bp.mealPreference || 'Gluten-Free Meal';
   const cleanMeal = formatCleanMealName(foodOption);
-  const ssrMealCode = getSsrMealCode(foodOption);
-  const bagTagRef = `SK-${Math.floor(100000 + Math.random() * 900000)}`;
+  const ssrMealCode = bp.ssrCode || getSsrMealCode(foodOption);
+  const rawBagTag = bp.baggageTag || `SK-${Math.floor(100000 + Math.random() * 900000)}`;
+  const bagTagRef = String(rawBagTag).replace(/\s*•\s*CABIN:\s*\d+KG/gi, '').trim();
 
   const airlineLogoB64 = getAirlineLogo(carrierCode, carrier);
 
@@ -630,10 +657,10 @@ export async function downloadBoardingPassPdf(bp) {
   const cleanFlight = String(flightNumber).replace(/[^0-9]/g, '').padStart(4, '0').substring(0, 4);
   const bcbpCode = bp.barcodeString || `M1${passengerName.padEnd(20, ' ').substring(0, 20)}E${cleanPnr} ${originCode}${destCode}${carrierCode.padEnd(3, ' ')} ${cleanFlight} 285Y0${seatNumber}0042 147>2180`;
 
-  const barcode2DSvg = generate2DMatrixBarcodeSvg(bcbpCode, 72, 72);
+  const barcode2DSvg = generate2DMatrixBarcodeSvg(bcbpCode, 64, 64);
   const stubBarcode1DSvg = generateSvgBarcode(`${carrierCode} ${ticketNumber.replace(/[^0-9]/g, '').substring(0, 10)} ${seatNumber}`, 180, 32);
 
-  // Build Boarding Pass Container (840px wide, no overlapping or cramped elements)
+  // Build Boarding Pass Container (840px wide landscape)
   const container = document.createElement('div');
   container.style.position = 'fixed';
   container.style.top = '0';
@@ -643,131 +670,138 @@ export async function downloadBoardingPassPdf(bp) {
   container.style.pointerEvents = 'none';
   container.style.width = '840px';
   container.style.backgroundColor = '#f5f3f3';
-  container.style.fontFamily = 'Arial, Helvetica, sans-serif';
+  container.style.fontFamily = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
   container.style.boxSizing = 'border-box';
   container.style.padding = '14px';
   container.style.lineHeight = '1.4';
 
   container.innerHTML = `
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+      * { box-sizing: border-box; }
+    </style>
+
     <div style="width: 100%; display: flex; background: #ffffff; border-radius: 16px; border: 1.5px solid #E6E6E6; box-shadow: 0 6px 24px rgba(0,28,59,0.08); overflow: hidden; position: relative;">
       
       <!-- Top Accent Stripe -->
       <div style="position: absolute; top: 0; left: 0; right: 0; height: 5px; background: #005cab;"></div>
 
       <!-- ============================================================ -->
-      <!-- 1. MAIN CARRIER BOARDING PASS PORTION (LEFT - 70%)           -->
+      <!-- 1. MAIN CARRIER BOARDING PASS PORTION (LEFT - 68%)           -->
       <!-- ============================================================ -->
-      <div style="flex: 2.5; padding: 22px 24px 18px 24px; display: flex; flex-direction: column; justify-content: space-between;">
+      <div style="flex: 2.4; padding: 22px 24px 18px 24px; display: flex; flex-direction: column; justify-content: space-between;">
         
         <!-- Header: Operating Airline & Security Stamps -->
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1.5px solid #E6E6E6; padding-bottom: 10px;">
           <div style="display: flex; align-items: center; gap: 10px;">
             ${airlineLogoB64 
-              ? `<img src="${airlineLogoB64}" style="height: 30px; width: auto; max-width: 110px; object-fit: contain;" alt="${carrier}" />`
-              : `<div style="font-size: 18px; font-weight: 900; color: #005cab;">${carrier}</div>`
+              ? `<img src="${airlineLogoB64}" style="height: 32px; width: auto; max-width: 110px; object-fit: contain; border-radius: 4px; flex-shrink: 0;" alt="${carrier}" />`
+              : `<div style="width: 36px; height: 36px; border-radius: 8px; background: #005cab; color: #ffffff; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                   <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>
+                 </div>`
             }
             <div>
-              <div style="font-size: 14px; font-weight: 900; color: #005cab; letter-spacing: -0.3px;">${carrier.toUpperCase()}</div>
-              <div style="font-size: 9.5px; font-weight: 700; color: #1b1c1c;">FLIGHT ${flightNumber} • ${departureDate}</div>
+              <div style="font-size: 14px; font-weight: 900; color: #005cab; letter-spacing: 0.2px; white-space: nowrap;">${carrier.toUpperCase()}</div>
+              <div style="font-size: 9.5px; font-weight: 700; color: #1b1c1c; white-space: nowrap; margin-top: 2px;">FLIGHT ${flightNumber} • ${departureDate}</div>
             </div>
           </div>
 
-          <!-- Security & Priority Badges -->
-          <div style="display: flex; gap: 6px; align-items: center;">
-            <span style="display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; background: #005cab; color: #ffffff; padding: 4px 10px; border-radius: 4px; line-height: 1.2;">DOCS OK</span>
-            <span style="display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; background: #d3e1f6; color: #005cab; padding: 4px 10px; border-radius: 4px; line-height: 1.2;">SKY PRIORITY</span>
-            <span style="display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; background: #e0f2fe; color: #0369a1; padding: 4px 10px; border-radius: 4px; line-height: 1.2;">SSR: ${ssrMealCode}</span>
+          <!-- Security & Priority Badges (white-space: nowrap & flex-shrink: 0 to prevent wrapping) -->
+          <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
+            <span style="display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; background: #005cab; color: #ffffff; padding: 4px 10px; border-radius: 4px; line-height: 1; white-space: nowrap; flex-shrink: 0;">DOCS OK</span>
+            <span style="display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; background: #d3e1f6; color: #005cab; padding: 4px 10px; border-radius: 4px; line-height: 1; white-space: nowrap; flex-shrink: 0;">SKY PRIORITY</span>
+            <span style="display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; background: #d1fae5; color: #065f46; padding: 4px 10px; border-radius: 4px; line-height: 1; white-space: nowrap; flex-shrink: 0;">SSR: ${ssrMealCode}</span>
           </div>
         </div>
 
         <!-- Passenger Identifiers & Route Banner -->
-        <div style="margin: 12px 0;">
-          <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 10px;">
+        <div style="margin: 10px 0;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 8px;">
             <div>
               <div style="font-size: 8.5px; font-weight: 800; text-transform: uppercase; color: #566476; letter-spacing: 0.5px;">Passenger Name</div>
-              <div style="font-size: 19px; font-weight: 900; color: #1b1c1c; line-height: 1.3; padding-top: 2px;">${passengerName}</div>
+              <div style="font-size: 18px; font-weight: 900; color: #1b1c1c; line-height: 1.2; padding-top: 2px;">${passengerName}</div>
             </div>
-            <div style="text-align: right; font-size: 10.5px;">
-              <span style="color: #566476;">E-Ticket:</span> <strong style="color: #1b1c1c;">${ticketNumber}</strong>
-              <span style="margin-left: 8px; color: #566476;">PNR:</span> <strong style="color: #005cab; font-size: 13px;">${pnr}</strong>
+            <div style="text-align: right; font-size: 10.5px; flex-shrink: 0;">
+              <span style="color: #566476;">E-Ticket:</span> <strong style="color: #1b1c1c; font-variant-numeric: tabular-nums;">${ticketNumber}</strong>
+              <span style="margin-left: 8px; color: #566476;">PNR:</span> <strong style="color: #005cab; font-size: 13px; font-variant-numeric: tabular-nums; letter-spacing: 0.5px;">${pnr}</strong>
             </div>
           </div>
 
-          <!-- Clean Route Box (No overlapping text, no duplicate terminal labels) -->
-          <div style="display: flex; justify-content: space-between; align-items: center; background: #F2F8FF; border: 1px solid #d3e1f6; border-radius: 10px; padding: 14px 22px;">
+          <!-- Clean Route Box -->
+          <div style="display: flex; justify-content: space-between; align-items: center; background: #F2F8FF; border: 1px solid #d3e1f6; border-radius: 10px; padding: 12px 20px;">
             <div>
               <div style="font-size: 9px; font-weight: 800; color: #566476; text-transform: uppercase; letter-spacing: 0.5px;">ORIGIN</div>
-              <div style="font-size: 34px; font-weight: 900; color: #1b1c1c; line-height: 1.1; margin: 2px 0;">${originCode}</div>
-              <div style="font-size: 13px; font-weight: 800; color: #1b1c1c; margin-top: 2px;">${originInfo.city}</div>
-              <div style="display: inline-block; font-size: 9px; font-weight: 800; color: #005cab; background: #e0f2fe; border: 1px solid #bae6fd; padding: 2px 8px; border-radius: 4px; margin-top: 4px;">${originInfo.terminal}</div>
+              <div style="font-size: 32px; font-weight: 900; color: #1b1c1c; line-height: 1.1; margin: 2px 0;">${originCode}</div>
+              <div style="font-size: 12px; font-weight: 800; color: #1b1c1c; margin-top: 2px;">${originInfo.city}</div>
+              <div style="display: inline-block; font-size: 9px; font-weight: 800; color: #005cab; background: #e0f2fe; border: 1px solid #bae6fd; padding: 2px 8px; border-radius: 4px; margin-top: 4px; white-space: nowrap;">${originInfo.terminal}</div>
             </div>
 
-            <div style="display: flex; flex-direction: column; align-items: center; padding: 0 10px;">
-              <div style="font-size: 10px; font-weight: 800; color: #525f71; letter-spacing: 0.5px;">NON-STOP</div>
-              <div style="display: flex; align-items: center; gap: 6px; width: 130px; margin: 6px 0;">
+            <div style="display: flex; flex-direction: column; align-items: center; padding: 0 10px; flex-shrink: 0;">
+              <div style="font-size: 10px; font-weight: 800; color: #525f71; letter-spacing: 0.5px; white-space: nowrap;">NON-STOP</div>
+              <div style="display: flex; align-items: center; gap: 6px; width: 120px; margin: 6px 0;">
                 <div style="height: 2px; flex: 1; background: #005cab;"></div>
-                <div style="color: #005cab; font-size: 14px;">✈</div>
+                <div style="color: #005cab; display: flex; align-items: center;">${ICON_PLANE}</div>
                 <div style="height: 2px; flex: 1; background: #005cab;"></div>
               </div>
-              <div style="font-size: 9.5px; font-weight: 700; color: #566476;">2h 45m</div>
+              <div style="font-size: 9.5px; font-weight: 700; color: #566476; white-space: nowrap;">2h 45m</div>
             </div>
 
             <div style="text-align: right;">
               <div style="font-size: 9px; font-weight: 800; color: #566476; text-transform: uppercase; letter-spacing: 0.5px;">DESTINATION</div>
-              <div style="font-size: 34px; font-weight: 900; color: #1b1c1c; line-height: 1.1; margin: 2px 0;">${destCode}</div>
-              <div style="font-size: 13px; font-weight: 800; color: #1b1c1c; margin-top: 2px;">${destInfo.city}</div>
-              <div style="display: inline-block; font-size: 9px; font-weight: 800; color: #005cab; background: #e0f2fe; border: 1px solid #bae6fd; padding: 2px 8px; border-radius: 4px; margin-top: 4px;">${destInfo.terminal}</div>
+              <div style="font-size: 32px; font-weight: 900; color: #1b1c1c; line-height: 1.1; margin: 2px 0;">${destCode}</div>
+              <div style="font-size: 12px; font-weight: 800; color: #1b1c1c; margin-top: 2px;">${destInfo.city}</div>
+              <div style="display: inline-block; font-size: 9px; font-weight: 800; color: #005cab; background: #e0f2fe; border: 1px solid #bae6fd; padding: 2px 8px; border-radius: 4px; margin-top: 4px; white-space: nowrap;">${destInfo.terminal}</div>
             </div>
           </div>
         </div>
 
         <!-- 4 High-Visibility Logistics Cards -->
-        <div style="display: grid; grid-template-columns: 1fr 1.2fr 1fr 1fr; gap: 8px; margin-bottom: 10px;">
+        <div style="display: grid; grid-template-columns: 1fr 1.2fr 1fr 1fr; gap: 8px; margin-bottom: 8px;">
           <!-- Gate -->
-          <div style="background: #fbf9f8; border: 1px solid #E6E6E6; border-radius: 8px; padding: 6px 10px; text-align: center;">
+          <div style="background: #fbf9f8; border: 1px solid #E6E6E6; border-radius: 8px; padding: 6px 8px; text-align: center; min-height: 62px; display: flex; flex-direction: column; justify-content: center; align-items: center;">
             <div style="font-size: 8px; font-weight: 800; color: #566476; text-transform: uppercase;">Boarding Gate</div>
             <div style="font-size: 20px; font-weight: 900; color: #1b1c1c; line-height: 1.1;">${gate}</div>
-            <div style="font-size: 8.5px; font-weight: 700; color: #005cab;">${terminal}</div>
+            <div style="font-size: 8.5px; font-weight: 700; color: #005cab; white-space: nowrap;">${terminal}</div>
           </div>
 
-          <!-- Boarding Time Highlight (Accurately computed 45m and 20m before departure) -->
-          <div style="background: #0075d7; color: #ffffff; border-radius: 8px; padding: 6px 10px; text-align: center; box-shadow: 0 2px 6px rgba(0,117,215,0.25);">
+          <!-- Boarding Time Highlight -->
+          <div style="background: #0075d7; color: #ffffff; border-radius: 8px; padding: 6px 8px; text-align: center; min-height: 62px; display: flex; flex-direction: column; justify-content: center; align-items: center;">
             <div style="font-size: 8px; font-weight: 800; text-transform: uppercase; opacity: 0.9;">Boarding Time</div>
-            <div style="font-size: 22px; font-weight: 900; line-height: 1.1;">${boardingTime}</div>
-            <div style="font-size: 8.5px; font-weight: 800; opacity: 0.95;">Closes ${gateCloseTime}</div>
+            <div style="font-size: 20px; font-weight: 900; line-height: 1.1;">${boardingTime}</div>
+            <div style="font-size: 8.5px; font-weight: 800; opacity: 0.95; white-space: nowrap;">Closes ${gateCloseTime}</div>
           </div>
 
           <!-- Zone / Sequence -->
-          <div style="background: #fbf9f8; border: 1px solid #E6E6E6; border-radius: 8px; padding: 6px 10px; text-align: center;">
+          <div style="background: #fbf9f8; border: 1px solid #E6E6E6; border-radius: 8px; padding: 6px 8px; text-align: center; min-height: 62px; display: flex; flex-direction: column; justify-content: center; align-items: center;">
             <div style="font-size: 8px; font-weight: 800; color: #566476; text-transform: uppercase;">Zone / Group</div>
             <div style="font-size: 18px; font-weight: 900; color: #525f71; line-height: 1.1;">${boardingGroup}</div>
             <div style="font-size: 8.5px; font-weight: 700; color: #566476;">SEQ ${seqNumber}</div>
           </div>
 
           <!-- Assigned Seat -->
-          <div style="background: #fbf9f8; border: 2px solid #005cab; border-radius: 8px; padding: 6px 10px; text-align: center;">
+          <div style="background: #fbf9f8; border: 2px solid #005cab; border-radius: 8px; padding: 6px 8px; text-align: center; min-height: 62px; display: flex; flex-direction: column; justify-content: center; align-items: center;">
             <div style="font-size: 8px; font-weight: 900; color: #005cab; text-transform: uppercase;">Seat</div>
-            <div style="font-size: 22px; font-weight: 900; color: #005cab; line-height: 1.1;">${seatNumber}</div>
-            <div style="font-size: 8px; font-weight: 700; color: #1b1c1c;">Economy / Win</div>
+            <div style="font-size: 20px; font-weight: 900; color: #005cab; line-height: 1.1;">${seatNumber}</div>
+            <div style="font-size: 8px; font-weight: 700; color: #1b1c1c; white-space: nowrap; margin-top: 2px;">${cabinClass} / Win</div>
           </div>
         </div>
 
-        <!-- Scannable 2D Aztec Barcode (Clean - IATA BCBP Encoded Data Block Completely Hidden) -->
+        <!-- Scannable 2D Aztec Barcode (Clean - No IATA Encoded Raw Dump) -->
         <div style="border-top: 1px solid #E6E6E6; padding-top: 8px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
           <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="flex-shrink: 0;">
+            <div style="flex-shrink: 0; background: #1b1c1c; border-radius: 4px; padding: 2px;">
               ${barcode2DSvg}
             </div>
             <div style="font-size: 9px; color: #404754; line-height: 1.4;">
               <div style="font-weight: 800; color: #005cab;">SECURE ELECTRONIC BOARDING PASS</div>
               <div style="color: #1b1c1c; font-weight: 700; margin-top: 2px;">BAG TAG: ${bagTagRef} • CABIN: 7KG</div>
-              <div style="color: #00A698; font-weight: 700; margin-top: 1px;">✓ ${cleanMeal} (${ssrMealCode})</div>
+              <div style="color: #047857; font-weight: 700; margin-top: 1px; display: flex; align-items: center;">${ICON_CHECK} ${cleanMeal} (${ssrMealCode})</div>
             </div>
           </div>
 
-          <div style="text-align: right; font-size: 9px; color: #566476; line-height: 1.3;">
+          <div style="text-align: right; font-size: 9px; color: #566476; line-height: 1.3; flex-shrink: 0;">
             <div style="font-weight: 700; color: #1b1c1c;">Gate closes 20 min prior</div>
-            <div>Valid Government ID Required</div>
+            <div style="color: #b45309; font-weight: 700;">Valid Govt Photo ID Required</div>
           </div>
         </div>
 
@@ -779,19 +813,19 @@ export async function downloadBoardingPassPdf(bp) {
       <div style="width: 1px; border-left: 2px dashed #cbd5e1; margin: 0; position: relative;"></div>
 
       <!-- ============================================================ -->
-      <!-- 2. PASSENGER TEAR-OFF COUPON (RIGHT - 30%)                   -->
+      <!-- 2. PASSENGER TEAR-OFF COUPON (RIGHT - 32%)                   -->
       <!-- (Passenger Coupon Text Completely Removed)                    -->
       <!-- ============================================================ -->
       <div style="flex: 1.1; background: #fbf9f8; padding: 22px 18px 18px 18px; display: flex; flex-direction: column; justify-content: space-between;">
         
         <div>
-          <!-- Stub Header (No 'Passenger Coupon' text) -->
+          <!-- Stub Header -->
           <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #E6E6E6; padding-bottom: 8px; margin-bottom: 10px;">
-            <span style="font-size: 13px; font-weight: 900; color: #005cab;">${carrier.split(' ')[0]}</span>
-            <span style="font-size: 9px; font-weight: 800; color: #005cab; text-transform: uppercase; letter-spacing: 0.5px;">FLIGHT STUB</span>
+            <span style="font-size: 14px; font-weight: 900; color: #005cab; white-space: nowrap;">${carrierBrand}</span>
+            <span style="font-size: 9px; font-weight: 800; color: #005cab; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap;">FLIGHT STUB</span>
           </div>
 
-          <!-- Stub Fields (Unclipped passenger name) -->
+          <!-- Stub Fields -->
           <div style="margin-bottom: 8px;">
             <div style="font-size: 8px; font-weight: 800; text-transform: uppercase; color: #566476;">Passenger</div>
             <div style="font-size: 12px; font-weight: 900; color: #1b1c1c; line-height: 1.3; padding: 1px 0;">${passengerName}</div>
@@ -811,7 +845,11 @@ export async function downloadBoardingPassPdf(bp) {
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 10px; margin-bottom: 8px;">
             <div>
               <span style="font-size: 8px; color: #566476; text-transform: uppercase; display: block;">Route</span>
-              <strong style="color: #1b1c1c;">${originCode} → ${destCode}</strong>
+              <strong style="color: #1b1c1c; display: flex; align-items: center; gap: 2px;">
+                ${originCode}
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+                ${destCode}
+              </strong>
             </div>
             <div>
               <span style="font-size: 8px; color: #566476; text-transform: uppercase; display: block;">Gate</span>
@@ -820,7 +858,7 @@ export async function downloadBoardingPassPdf(bp) {
           </div>
 
           <!-- Seat & Boarding Highlight on Stub -->
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: #ffffff; border: 1px solid #E6E6E6; border-radius: 8px; padding: 6px 10px; margin-bottom: 8px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: #ffffff; border: 1px solid #E6E6E6; border-radius: 8px; padding: 6px 8px; min-height: 48px; margin-bottom: 8px;">
             <div>
               <div style="font-size: 8px; font-weight: 800; color: #005cab; text-transform: uppercase;">Seat</div>
               <div style="font-size: 18px; font-weight: 900; color: #005cab; line-height: 1.1;">${seatNumber}</div>
@@ -832,8 +870,8 @@ export async function downloadBoardingPassPdf(bp) {
           </div>
 
           <div style="display: flex; justify-content: space-between; font-size: 9px; color: #566476;">
-            <span>PNR: <strong style="color: #1b1c1c;">${pnr}</strong></span>
-            <span>SEQ: <strong style="color: #1b1c1c;">${seqNumber}</strong></span>
+            <span>PNR: <strong style="color: #1b1c1c; font-variant-numeric: tabular-nums;">${pnr}</strong></span>
+            <span>SEQ: <strong style="color: #1b1c1c; font-variant-numeric: tabular-nums;">${seqNumber}</strong></span>
             <span><strong>${boardingGroup}</strong></span>
           </div>
         </div>
@@ -853,17 +891,37 @@ export async function downloadBoardingPassPdf(bp) {
   document.body.appendChild(container);
 
   try {
-    const canvas = await html2canvas(container, {
-      scale: 2, // 200 DPI high-definition print quality
-      useCORS: true,
-      logging: false,
-      backgroundColor: '#f5f3f3'
-    });
+    if (document.fonts?.ready) {
+      await document.fonts.ready;
+    }
 
-    // High quality JPEG compression (reduces size from 15MB+ PNG down to <700KB)
-    const imgData = canvas.toDataURL('image/jpeg', 0.92);
-    // Compute exact height so PDF is never squashed or stretched vertically
-    const imgHeight = Math.round((canvas.height * 840) / canvas.width);
+    let imgData;
+    let imgHeight;
+
+    try {
+      imgData = await toJpeg(container, {
+        quality: 0.95,
+        pixelRatio: 2,
+        backgroundColor: '#f5f3f3'
+      });
+      const elWidth = container.offsetWidth || 840;
+      const elHeight = container.offsetHeight || 380;
+      imgHeight = Math.round((elHeight * 840) / elWidth);
+    } catch (toImgErr) {
+      console.warn('html-to-image render fallback to html2canvas:', toImgErr);
+      const canvas = await html2canvas(container, {
+        scale: 2, // 200 DPI crisp print quality
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#f5f3f3',
+        scrollX: 0,
+        scrollY: 0,
+        windowWidth: 840
+      });
+      imgData = canvas.toDataURL('image/jpeg', 0.92);
+      imgHeight = Math.round((canvas.height * 840) / canvas.width);
+    }
+
     const pdf = new jsPDF({
       orientation: 'landscape',
       unit: 'pt',

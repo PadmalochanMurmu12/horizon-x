@@ -355,7 +355,7 @@ function generateBoardingPass(booking, format = 'markdown', passengerIndex = 0) 
     ssrCode,
     priorityTag: 'SKY PRIORITY',
     securityStatus: 'DOCS OK',
-    baggageTag: `SK-${Math.floor(100000 + Math.random() * 900000)} • CABIN: 7KG`,
+    baggageTag: `SK-${Math.floor(100000 + Math.random() * 900000)}`,
     frequentFlyer: 'SkyMiles Silver'
   };
 
